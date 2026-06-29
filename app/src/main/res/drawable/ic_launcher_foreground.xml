@@ -1,0 +1,40 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Background Group -->
+    <group android:name="compare_sheets">
+        <!-- Original File Sheet (Back - Cyan Accent) -->
+        <path
+            android:fillColor="#00BCD4"
+            android:pathData="M 32,28 L 60,28 L 68,36 L 68,72 L 32,72 Z" />
+        
+        <!-- Folded Corner for Back File -->
+        <path
+            android:fillColor="#B2EBF2"
+            android:pathData="M 60,28 L 68,36 L 60,36 Z" />
+
+        <!-- Modified File Sheet (Front - Indigo Accent) -->
+        <path
+            android:fillColor="#3F51B5"
+            android:pathData="M 40,36 L 68,36 L 76,44 L 76,80 L 40,80 Z" />
+
+        <!-- Folded Corner for Front File -->
+        <path
+            android:fillColor="#C5CAE9"
+            android:pathData="M 68,36 L 76,44 L 68,44 Z" />
+
+        <!-- Highlighted Difference Lines inside Front File -->
+        <!-- Green Insertion Line -->
+        <path
+            android:fillColor="#4CAF50"
+            android:pathData="M 46,52 L 70,52 L 70,56 L 46,56 Z" />
+        
+        <!-- Red Deletion Line -->
+        <path
+            android:fillColor="#FF5252"
+            android:pathData="M 46,62 L 64,62 L 64,66 L 46,66 Z" />
+    </group>
+</vector>

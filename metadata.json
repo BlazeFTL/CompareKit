@@ -1,0 +1,6 @@
+{
+  "name": "File Compare",
+  "description": "Compare files, folders, and ZIP archives with a beautiful Material 3 interface, syntax highlighting, and live side-by-side or unified diff viewing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
