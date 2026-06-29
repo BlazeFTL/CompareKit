@@ -23,7 +23,7 @@ fun CreateFileDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Create Sandbox File") },
+        title = { Text("Create New File") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(

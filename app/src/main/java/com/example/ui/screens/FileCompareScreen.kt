@@ -45,6 +45,7 @@ fun FileCompareScreen(
 
     var showGoToLineDialog by remember { mutableStateOf(false) }
     var goToLineText by remember { mutableStateOf("") }
+    var lineWrapEnabled by remember { mutableStateOf(false) }
 
     // Find line indices of all changed lines (for Up/Down traversal)
     val changedLineIndices = remember(diffLines) {
@@ -84,6 +85,20 @@ fun FileCompareScreen(
                     }
                 },
                 actions = {
+                    // Line wrapping toggle
+                    IconButton(
+                        onClick = { lineWrapEnabled = !lineWrapEnabled },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = if (lineWrapEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WrapText,
+                            contentDescription = "Toggle Line Wrapping"
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+
                     // View Mode Switcher Row
                     Text("Split", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 4.dp))
                     Switch(
@@ -289,6 +304,7 @@ fun FileCompareScreen(
                             filename = fileItem.relativePath,
                             searchQuery = fileSearchQuery,
                             listState = listState,
+                            lineWrap = lineWrapEnabled,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -297,6 +313,7 @@ fun FileCompareScreen(
                             filename = fileItem.relativePath,
                             searchQuery = fileSearchQuery,
                             listState = listState,
+                            lineWrap = lineWrapEnabled,
                             modifier = Modifier.fillMaxSize()
                         )
                     }

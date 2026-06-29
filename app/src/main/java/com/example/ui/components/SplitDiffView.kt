@@ -75,56 +75,71 @@ fun SplitDiffView(
     filename: String,
     searchQuery: String,
     listState: LazyListState,
+    lineWrap: Boolean,
     modifier: Modifier = Modifier
 ) {
     val splitRows = SplitAligner.align(diffLines)
+    val horizontalScrollState = rememberScrollState()
 
-    LazyColumn(
-        state = listState,
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFFAFAFA))
+            .then(
+                if (!lineWrap) Modifier.horizontalScroll(horizontalScrollState) else Modifier
+            )
     ) {
-        itemsIndexed(splitRows) { rowIndex, row ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(IntrinsicSize.Min)
-            ) {
-                // Left pane: Source File (Deleted/Modified/Equal)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                ) {
-                    CellView(
-                        item = row.leftItem,
-                        isLeft = true,
-                        filename = filename,
-                        searchQuery = searchQuery
-                    )
-                }
-
-                // Vertical Divider between left and right side
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(1.dp)
-                        .background(Color.LightGray)
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxHeight()
+                .then(
+                    if (!lineWrap) Modifier.width(1600.dp) else Modifier.fillMaxWidth()
                 )
-
-                // Right pane: Modified File (Inserted/Modified/Equal)
-                Box(
+                .background(Color(0xFFFAFAFA))
+        ) {
+            itemsIndexed(splitRows) { rowIndex, row ->
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min)
                 ) {
-                    CellView(
-                        item = row.rightItem,
-                        isLeft = false,
-                        filename = filename,
-                        searchQuery = searchQuery
+                    // Left pane: Source File (Deleted/Modified/Equal)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        CellView(
+                            item = row.leftItem,
+                            isLeft = true,
+                            filename = filename,
+                            searchQuery = searchQuery,
+                            lineWrap = lineWrap
+                        )
+                    }
+
+                    // Vertical Divider between left and right side
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(1.dp)
+                            .background(Color.LightGray)
                     )
+
+                    // Right pane: Modified File (Inserted/Modified/Equal)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        CellView(
+                            item = row.rightItem,
+                            isLeft = false,
+                            filename = filename,
+                            searchQuery = searchQuery,
+                            lineWrap = lineWrap
+                        )
+                    }
                 }
             }
         }
@@ -136,7 +151,8 @@ private fun CellView(
     item: DiffItem<String>?,
     isLeft: Boolean,
     filename: String,
-    searchQuery: String
+    searchQuery: String,
+    lineWrap: Boolean
 ) {
     if (item == null) {
         // Empty cell for alignment spacing
@@ -158,8 +174,6 @@ private fun CellView(
     }
 
     val numText = if (isLeft) item.originalIndex?.plus(1)?.toString() ?: "" else item.revisedIndex?.plus(1)?.toString() ?: ""
-
-    val hScrollState = rememberScrollState()
 
     Row(
         modifier = Modifier
@@ -209,7 +223,6 @@ private fun CellView(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .horizontalScroll(hScrollState)
                 .padding(start = 4.dp, end = 8.dp)
         ) {
             Text(
@@ -217,7 +230,7 @@ private fun CellView(
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1
+                softWrap = lineWrap
             )
         }
     }
