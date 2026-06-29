@@ -36,9 +36,9 @@ class MainActivity : ComponentActivity() {
           }
         }
 
-        // Initialize the workspace sandbox automatically with high quality examples on launch
+        // Initialize explorer on launch to load persistent SAF tree if it exists
         LaunchedEffect(Unit) {
-          compareViewModel.initializeDemoWorkspace(applicationContext)
+          compareViewModel.initExplorer(applicationContext)
         }
 
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->

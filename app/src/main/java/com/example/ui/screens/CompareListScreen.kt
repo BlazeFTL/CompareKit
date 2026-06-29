@@ -22,15 +22,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.documentfile.provider.DocumentFile
 import com.example.file.FileCompareStatus
 import com.example.file.FileStatus
 import com.example.ui.components.CreateFileDialog
 import com.example.ui.components.DiffSettingsDialog
 import com.example.ui.components.EditFileDialog
 import com.example.ui.viewmodel.CompareViewModel
+import com.example.ui.viewmodel.PickerTarget
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,32 +43,27 @@ fun CompareListScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val sourceName by viewModel.sourceName.collectAsState()
-    val modifiedName by viewModel.modifiedName.collectAsState()
+    
+    // Viewmodel State Collections
+    val safRootUri by viewModel.safRootUri.collectAsState()
+    val currentSafDir by viewModel.currentSafDir.collectAsState()
+    val safFilesList by viewModel.safFilesList.collectAsState()
+    
+    val sourceSafName by viewModel.sourceSafName.collectAsState()
+    val modifiedSafName by viewModel.modifiedSafName.collectAsState()
+    
+    val activePickerTarget by viewModel.activePickerTarget.collectAsState()
+    val hasRunComparison by viewModel.hasRunComparison.collectAsState()
+    
+    val isProcessing by viewModel.isProcessing.collectAsState()
+    val sourceDir by viewModel.sourceDir.collectAsState()
+    val modifiedDir by viewModel.modifiedDir.collectAsState()
     val fileList by viewModel.fileList.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val statusFilter by viewModel.statusFilter.collectAsState()
     val diffOptions by viewModel.diffOptions.collectAsState()
     val beautifierEnabled by viewModel.beautifierEnabled.collectAsState()
-    val isProcessing by viewModel.isProcessing.collectAsState()
-    val sourceDir by viewModel.sourceDir.collectAsState()
-    val modifiedDir by viewModel.modifiedDir.collectAsState()
-    
-    var forceExpandLocations by remember { mutableStateOf(false) }
-    val showLocationPicker = sourceDir == null || modifiedDir == null || forceExpandLocations
-
-    val currentExplorerDir by viewModel.currentExplorerDir.collectAsState()
-    val explorerFiles by viewModel.explorerFiles.collectAsState()
-
-    var showCreateFolderDialog by remember { mutableStateOf(false) }
-    var folderNameToCreate by remember { mutableStateOf("") }
-
-    var showCreateFileInExplorerDialog by remember { mutableStateOf(false) }
-    var fileNameToCreate by remember { mutableStateOf("") }
-    var fileContentToCreate by remember { mutableStateOf("") }
-
-    var showRenameExplorerItemDialog by remember { mutableStateOf<File?>(null) }
-    var itemNewName by remember { mutableStateOf("") }
+    val errorMessage by viewModel.errorMessage.collectAsState()
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
@@ -75,58 +73,11 @@ fun CompareListScreen(
     var editingIsSource by remember { mutableStateOf(true) }
     var editingFileContent by remember { mutableStateOf("") }
 
-    // Picker Launchers
-    val sourceZipLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.selectSourceZip(context, it) }
-    }
-
-    val modifiedZipLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.selectModifiedZip(context, it) }
-    }
-
-    val sourceFolderLauncher = rememberLauncherForActivityResult(
+    // Launcher for Authorization / ACTION_OPEN_DOCUMENT_TREE
+    val safDirectoryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
-        uri?.let { viewModel.selectSourceFolder(context, it) }
-    }
-
-    val modifiedFolderLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.selectModifiedFolder(context, it) }
-    }
-
-    val sourceFileLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.selectSourceFile(context, it) }
-    }
-
-    val modifiedFileLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.selectModifiedFile(context, it) }
-    }
-
-    val importFileLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.importFileIntoExplorer(context, it) }
-    }
-
-    val importZipLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.importZipIntoExplorer(context, it) }
-    }
-
-    // Trigger explorer initialization on launch
-    LaunchedEffect(Unit) {
-        viewModel.initExplorer(context)
+        uri?.let { viewModel.setSafRoot(context, it) }
     }
 
     Scaffold(
@@ -138,218 +89,174 @@ fun CompareListScreen(
                             imageVector = Icons.Default.Compare,
                             contentDescription = "Compare Icon",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 8.dp)
+                            modifier = Modifier.size(28.dp)
                         )
-                        Text("File Compare", fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            "File Compare",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showSettingsDialog = true }) {
-                        Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+                    if (hasRunComparison) {
+                        IconButton(onClick = { showSettingsDialog = true }) {
+                            Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+                        }
                     }
-                    IconButton(onClick = { viewModel.resetToDemoWorkspace(context) }) {
-                        Icon(imageVector = Icons.Default.Restore, contentDescription = "Reset Demo")
+                    if (safRootUri != null) {
+                        IconButton(
+                            onClick = { safDirectoryLauncher.launch(null) }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FolderSpecial,
+                                contentDescription = "Change Root Folder",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
                 )
             )
         },
         floatingActionButton = {
-            if (!showLocationPicker) {
+            if (hasRunComparison) {
                 FloatingActionButton(
                     onClick = { showCreateDialog = true },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "Create New File")
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "Create File")
                 }
             }
-        },
-        modifier = modifier
+        }
     ) { innerPadding ->
         Box(
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Directories / Files Chooser Section (Collapsible In-App File Explorer)
-                if (showLocationPicker) {
+            when {
+                // PHASE 1: NO STORAGE ACCESS - Ask for SAF on First Launch
+                safRootUri == null -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderOpen,
+                            contentDescription = "Storage Folder Required",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(80.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            "Storage Access Required",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "To pick and compare files, grant access to a folder on your device. This sets up an inbuilt, offline file explorer.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = { safDirectoryLauncher.launch(null) },
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+                        ) {
+                            Icon(Icons.Default.LockOpen, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Grant Storage Access", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // PHASE 2: IN-APP FILE EXPLORER IS OPEN - Browsing storage files/folders
+                activePickerTarget != PickerTarget.NONE -> {
+                    val targetLabel = if (activePickerTarget == PickerTarget.ORIGINAL) "Original (Left)" else "Modified (Right)"
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(12.dp)
                     ) {
-                        // Header
+                        // Header info & Actions
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                "Workspace Explorer",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            if (sourceDir != null && modifiedDir != null) {
-                                TextButton(
-                                    onClick = { forceExpandLocations = false }
-                                ) {
-                                    Icon(imageVector = Icons.Default.Check, contentDescription = "Done")
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Show Comparison")
-                                }
-                            }
-                        }
-
-                        // Current Selection Status Overview Cards
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (sourceDir != null) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                            Column {
+                                Text(
+                                    "Pick $targetLabel",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text("Original (Left)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = sourceName ?: "Not selected",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (modifiedDir != null) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                Text(
+                                    text = "Navigate and select an item",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text("Modified (Right)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = modifiedName ?: "Not selected",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                            }
+                            IconButton(onClick = { viewModel.setActivePickerTarget(PickerTarget.NONE) }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close Picker")
                             }
                         }
 
-                        if (sourceDir != null && modifiedDir != null) {
-                            Button(
-                                onClick = { 
-                                    forceExpandLocations = false 
-                                    viewModel.runComparison()
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                            ) {
-                                Icon(Icons.Default.Compare, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Compare Selected Items", fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                        Divider(modifier = Modifier.padding(vertical = 8.dp))
-
-                        // Breadcrumbs / Folder Navigation Row
-                        val isAtRoot = currentExplorerDir?.absolutePath == File(context.filesDir, "sandbox").absolutePath
+                        // Current Path breadcrumb row
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                        ) {
-                            if (!isAtRoot) {
-                                IconButton(onClick = { viewModel.navigateUpExplorer(context) }) {
-                                    Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Go Up")
-                                }
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.FolderOpen,
-                                    contentDescription = "Root",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(8.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isAtRoot) "Workspace Root" else currentExplorerDir?.name ?: "Unknown Folder",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        // In-App Explorer Action Toolbar (Create Folder, Create File, Import ZIP, Import File)
-                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
-                            // New Folder
-                            FilledTonalButton(
-                                onClick = { showCreateFolderDialog = true },
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
-                            ) {
-                                Icon(Icons.Default.CreateNewFolder, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text("Folder", fontSize = 11.sp, maxLines = 1)
+                            val isAtRoot = currentSafDir?.uri?.toString() == safRootUri
+                            if (!isAtRoot) {
+                                IconButton(
+                                    onClick = { viewModel.navigateUpSaf(context) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.ArrowBack, contentDescription = "Up", modifier = Modifier.size(20.dp))
+                                }
+                            } else {
+                                Icon(Icons.Default.FolderOpen, contentDescription = "Root", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             }
-                            // New File
-                            FilledTonalButton(
-                                onClick = { showCreateFileInExplorerDialog = true },
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isAtRoot) "Storage Root" else (currentSafDir?.name ?: "Current Folder"),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            // Choose current directory button
+                            TextButton(
+                                onClick = { viewModel.selectCurrentSafDirForTarget(context) }
                             ) {
-                                Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text("File", fontSize = 11.sp, maxLines = 1)
-                            }
-                            // Import File
-                            FilledTonalButton(
-                                onClick = { importFileLauncher.launch("*/*") },
-                                modifier = Modifier.weight(1.1f),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
-                            ) {
-                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text("Import", fontSize = 11.sp, maxLines = 1)
-                            }
-                            // Import ZIP
-                            FilledTonalButton(
-                                onClick = { importZipLauncher.launch("application/zip") },
-                                modifier = Modifier.weight(1.1f),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
-                            ) {
-                                Icon(Icons.Default.FolderZip, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text("Import ZIP", fontSize = 11.sp, maxLines = 1)
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Select Folder", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
-                        // Files and Folders Listing
-                        Text(
-                            "Items inside this directory:",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                        )
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                        if (explorerFiles.isEmpty()) {
+                        // Explorer Files List
+                        if (safFilesList.isEmpty()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -357,8 +264,8 @@ fun CompareListScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.FolderOpen, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(48.dp))
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Icon(Icons.Default.FolderOpen, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(56.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
                                     Text("This folder is empty", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
@@ -369,129 +276,71 @@ fun CompareListScreen(
                                     .weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                items(explorerFiles) { file ->
-                                    val isSelectedAsSource = file.absolutePath == sourceDir?.absolutePath
-                                    val isSelectedAsModified = file.absolutePath == modifiedDir?.absolutePath
-
-                                    val itemBg = when {
-                                        isSelectedAsSource -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.25f)
-                                        isSelectedAsModified -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                                        else -> Color.Transparent
+                                items(safFilesList) { file ->
+                                    val isZip = file.name?.lowercase()?.endsWith(".zip") == true
+                                    val isDir = file.isDirectory
+                                    
+                                    val icon = when {
+                                        isDir -> Icons.Default.Folder
+                                        isZip -> Icons.Default.FolderZip
+                                        else -> Icons.Default.Description
                                     }
-
-                                    val borderStroke = when {
-                                        isSelectedAsSource -> BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f))
-                                        isSelectedAsModified -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-                                        else -> null
+                                    
+                                    val tint = when {
+                                        isDir -> MaterialTheme.colorScheme.secondary
+                                        isZip -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                                     }
 
                                     Surface(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(8.dp),
-                                        color = itemBg,
-                                        border = borderStroke,
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
                                         onClick = {
-                                            if (file.isDirectory) {
-                                                viewModel.navigateToExplorerDir(file)
+                                            if (isDir) {
+                                                viewModel.navigateToSafDir(context, file)
                                             }
                                         }
                                     ) {
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Icon(
-                                                imageVector = if (file.isDirectory) Icons.Default.Folder else Icons.Default.Description,
+                                                imageVector = icon,
                                                 contentDescription = null,
-                                                tint = if (file.isDirectory) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                tint = tint,
                                                 modifier = Modifier.size(24.dp)
                                             )
-                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Spacer(modifier = Modifier.width(12.dp))
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    text = file.name,
+                                                    text = file.name ?: "Unnamed",
                                                     style = MaterialTheme.typography.bodyMedium,
                                                     fontWeight = FontWeight.Medium,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
-                                                if (isSelectedAsSource || isSelectedAsModified) {
-                                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                        if (isSelectedAsSource) {
-                                                            SuggestionChip(
-                                                                onClick = {},
-                                                                label = { Text("Original (Left)", fontSize = 9.sp) },
-                                                                colors = SuggestionChipDefaults.suggestionChipColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                                                            )
-                                                        }
-                                                        if (isSelectedAsModified) {
-                                                            SuggestionChip(
-                                                                onClick = {},
-                                                                label = { Text("Modified (Right)", fontSize = 9.sp) },
-                                                                colors = SuggestionChipDefaults.suggestionChipColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                                                            )
-                                                        }
-                                                    }
-                                                }
+                                                Text(
+                                                    text = if (isDir) "Directory" else if (isZip) "ZIP Archive" else "File (${formatSize(file.length())})",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color.Gray
+                                                )
                                             }
-
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                                verticalAlignment = Alignment.CenterVertically
+                                            // Select Item action
+                                            Button(
+                                                onClick = { viewModel.selectSafItemForTarget(context, file) },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                                modifier = Modifier.height(32.dp)
                                             ) {
-                                                // Set Original (Left) Button
-                                                IconButton(
-                                                    onClick = { viewModel.selectExplorerAsSource(file) },
-                                                    modifier = Modifier.size(32.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.ArrowBack,
-                                                        contentDescription = "Set Original",
-                                                        tint = MaterialTheme.colorScheme.secondary,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                                // Set Modified (Right) Button
-                                                IconButton(
-                                                    onClick = { viewModel.selectExplorerAsModified(file) },
-                                                    modifier = Modifier.size(32.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.ArrowForward,
-                                                        contentDescription = "Set Modified",
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                                // Rename
-                                                IconButton(
-                                                    onClick = {
-                                                        showRenameExplorerItemDialog = file
-                                                        itemNewName = file.name
-                                                    },
-                                                    modifier = Modifier.size(32.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Edit,
-                                                        contentDescription = "Rename",
-                                                        tint = Color.Gray,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                                // Delete
-                                                IconButton(
-                                                    onClick = { viewModel.deleteExplorerItem(file) },
-                                                    modifier = Modifier.size(32.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Delete,
-                                                        contentDescription = "Delete",
-                                                        tint = MaterialTheme.colorScheme.error,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
+                                                Text("Choose", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                     }
@@ -499,201 +348,350 @@ fun CompareListScreen(
                             }
                         }
                     }
-                } else {
-                    // Sleek Compact Banner when results are shown and picker is hidden
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                }
+
+                // PHASE 3: MAIN VIEW (Split into selection and actual comparison lists)
+                else -> {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        
+                        // IF COMPARISON HAS RUN: Show Comparison Banner
+                        if (hasRunComparison) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "Comparing Selected Items",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "$sourceSafName  ➔  $modifiedSafName",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Button(
+                                        onClick = { viewModel.resetComparisonSelection() },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.error,
+                                            contentColor = MaterialTheme.colorScheme.onError
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 12.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Text("Change", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        // IF COMPARISON HAS NOT RUN: Show beautiful clean selection fields
+                        if (!hasRunComparison) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .padding(20.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    "Pick Items to Compare",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(bottom = 24.dp)
+                                )
+
+                                // Pick Original Card (Button 1)
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.setActivePickerTarget(PickerTarget.ORIGINAL) },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (sourceSafName != null) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                    ),
+                                    border = BorderStroke(1.dp, if (sourceSafName != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Folder,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.secondary,
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                "Pick Original Files/Folder",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = sourceSafName ?: "No item selected",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (sourceSafName != null) MaterialTheme.colorScheme.secondary else Color.Gray,
+                                                fontWeight = if (sourceSafName != null) FontWeight.SemiBold else FontWeight.Normal,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = Icons.Default.KeyboardArrowRight,
+                                            contentDescription = null,
+                                            tint = Color.Gray
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Pick Modified Card (Button 2)
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.setActivePickerTarget(PickerTarget.MODIFIED) },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (modifiedSafName != null) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                    ),
+                                    border = BorderStroke(1.dp, if (modifiedSafName != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.FolderSpecial,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                "Pick Modified Files/Folder",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = modifiedSafName ?: "No item selected",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (modifiedSafName != null) MaterialTheme.colorScheme.primary else Color.Gray,
+                                                fontWeight = if (modifiedSafName != null) FontWeight.SemiBold else FontWeight.Normal,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = Icons.Default.KeyboardArrowRight,
+                                            contentDescription = null,
+                                            tint = Color.Gray
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(32.dp))
+
+                                // COMPARE NOW BUTTON (Visible once both choices are loaded)
+                                if (sourceSafName != null && modifiedSafName != null) {
+                                    Button(
+                                        onClick = { viewModel.performComparison(context) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(52.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary
+                                        )
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Compare, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Compare Selected Items", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        // IF COMPARISON HAS RUN: Show Search, filters, and list results
+                        if (hasRunComparison) {
+                            // Search Bar
                             Row(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.CompareArrows,
-                                    contentDescription = "Comparing",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = "Comparing",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color.Gray
-                                    )
-                                    Text(
-                                        text = "$sourceName vs $modifiedName",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                            TextButton(
-                                onClick = { forceExpandLocations = true },
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                            ) {
-                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Change", fontSize = 12.sp)
-                            }
-                        }
-                    }
-
-                    // Search & Filters Bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { viewModel.updateSearchQuery(it) },
-                            placeholder = { Text("Search files...") },
-                            leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search") },
-                            trailingIcon = {
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { viewModel.updateSearchQuery("") }) {
-                                        Icon(imageVector = Icons.Default.Close, contentDescription = "Clear")
-                                    }
-                                }
-                            },
-                            singleLine = true,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(56.dp)
-                        )
-                    }
-
-                    // Filter Status Chips
-                    ScrollableTabRow(
-                        selectedTabIndex = getStatusIndex(statusFilter),
-                        edgePadding = 12.dp,
-                        indicator = {},
-                        divider = {},
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp)
-                    ) {
-                        val statuses = listOf(null, FileStatus.MODIFIED, FileStatus.ADDED, FileStatus.DELETED, FileStatus.UNCHANGED)
-                        val labels = listOf("All Files", "Modified", "Added", "Deleted", "Unchanged")
-                        
-                        statuses.forEachIndexed { idx, status ->
-                            val selected = statusFilter == status
-                            FilterChip(
-                                selected = selected,
-                                onClick = { viewModel.updateStatusFilter(status) },
-                                label = { Text(labels[idx]) },
-                                modifier = Modifier.padding(horizontal = 4.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            )
-                        }
-                    }
-
-                    // File List Column
-                    val filteredList = fileList.filter { file ->
-                        val matchQuery = file.relativePath.contains(searchQuery, ignoreCase = true)
-                        val matchStatus = statusFilter == null || file.status == statusFilter
-                        matchQuery && matchStatus
-                    }
-
-                    if (filteredList.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(24.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.FolderOpen,
-                                    contentDescription = "No Files",
-                                    tint = Color.LightGray,
-                                    modifier = Modifier.size(64.dp)
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    "No Matching Files Found",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Gray
-                                )
-                                Text(
-                                    "Create new files or select folders/ZIPs to start comparing!",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.Gray,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .padding(horizontal = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(filteredList) { fileStatus ->
-                                FileCompareCard(
-                                    item = fileStatus,
-                                    onCompare = { viewModel.selectFileForDiff(fileStatus) },
-                                    onEdit = { isSource ->
-                                        val targetDir = if (isSource) sourceDir else modifiedDir
-                                        if (targetDir != null) {
-                                            val targetFile = File(targetDir, fileStatus.relativePath)
-                                            editingFileContent = if (targetFile.exists()) targetFile.readText() else ""
-                                            editingIsSource = isSource
-                                            editingFileStatus = fileStatus
+                                OutlinedTextField(
+                                    value = searchQuery,
+                                    onValueChange = { viewModel.updateSearchQuery(it) },
+                                    placeholder = { Text("Search files...") },
+                                    leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search") },
+                                    trailingIcon = {
+                                        if (searchQuery.isNotEmpty()) {
+                                            IconButton(onClick = { viewModel.updateSearchQuery("") }) {
+                                                Icon(imageVector = Icons.Default.Close, contentDescription = "Clear")
+                                            }
                                         }
                                     },
-                                    onDelete = { isSource ->
-                                        viewModel.deleteSandboxFile(fileStatus.relativePath, isSource)
-                                    }
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(56.dp)
                                 )
+                            }
+
+                            // Filter Chips
+                            ScrollableTabRow(
+                                selectedTabIndex = getStatusIndex(statusFilter),
+                                edgePadding = 12.dp,
+                                indicator = {},
+                                divider = {},
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                val statuses = listOf(null, FileStatus.MODIFIED, FileStatus.ADDED, FileStatus.DELETED, FileStatus.UNCHANGED)
+                                val labels = listOf("All Files", "Modified", "Added", "Deleted", "Unchanged")
+                                
+                                statuses.forEachIndexed { idx, status ->
+                                    val selected = statusFilter == status
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { viewModel.updateStatusFilter(status) },
+                                        label = { Text(labels[idx]) },
+                                        modifier = Modifier.padding(horizontal = 4.dp),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    )
+                                }
+                            }
+
+                            // Filtered List
+                            val filteredList = fileList.filter { file ->
+                                val matchQuery = file.relativePath.contains(searchQuery, ignoreCase = true)
+                                val matchStatus = statusFilter == null || file.status == statusFilter
+                                matchQuery && matchStatus
+                            }
+
+                            if (filteredList.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.padding(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.FolderOpen,
+                                            contentDescription = "No Files",
+                                            tint = Color.LightGray,
+                                            modifier = Modifier.size(64.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            "No Matching Files Found",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.Gray
+                                        )
+                                        Text(
+                                            "Try searching for something else or adjust filters.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                    }
+                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                        .padding(horizontal = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(filteredList) { fileStatus ->
+                                        FileCompareCard(
+                                            item = fileStatus,
+                                            onCompare = { viewModel.selectFileForDiff(fileStatus) },
+                                            onEdit = { isSource ->
+                                                val targetDir = if (isSource) sourceDir else modifiedDir
+                                                if (targetDir != null) {
+                                                    val targetFile = File(targetDir, fileStatus.relativePath)
+                                                    editingFileContent = if (targetFile.exists()) targetFile.readText() else ""
+                                                    editingIsSource = isSource
+                                                    editingFileStatus = fileStatus
+                                                }
+                                            },
+                                            onDelete = { isSource ->
+                                                viewModel.deleteSandboxFile(fileStatus.relativePath, isSource)
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Indeterminate loading screen overlay
+            // PROCESSING/PROGRESS OVERLAY
             if (isProcessing) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.2f)),
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable(enabled = false) {},
                     contentAlignment = Alignment.Center
                 ) {
-                    Card {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
                         Row(
                             modifier = Modifier.padding(24.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text("Processing comparison...", fontWeight = FontWeight.Medium)
+                            CircularProgressIndicator()
+                            Text(
+                                "Comparing files, please wait...",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
                         }
                     }
                 }
@@ -701,7 +699,21 @@ fun CompareListScreen(
         }
     }
 
-    // Settings Dialog
+    // ERRORS TOAST-LIKE BANNER
+    if (errorMessage != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearErrorMessage() },
+            title = { Text("Error") },
+            text = { Text(errorMessage ?: "An unexpected error occurred.") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearErrorMessage() }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
+    // DIFF SETTINGS DIALOG
     if (showSettingsDialog) {
         DiffSettingsDialog(
             options = diffOptions,
@@ -715,7 +727,7 @@ fun CompareListScreen(
         )
     }
 
-    // Create File Dialog
+    // CREATE FILE DIALOG (Create Sandbox file)
     if (showCreateDialog) {
         CreateFileDialog(
             onDismiss = { showCreateDialog = false },
@@ -726,7 +738,7 @@ fun CompareListScreen(
         )
     }
 
-    // Edit File Dialog
+    // EDIT FILE DIALOG (Edit Sandbox file)
     if (editingFileStatus != null) {
         EditFileDialog(
             filename = editingFileStatus!!.relativePath,
@@ -739,150 +751,21 @@ fun CompareListScreen(
             }
         )
     }
-
-    // Explorer Create Folder Dialog
-    if (showCreateFolderDialog) {
-        AlertDialog(
-            onDismissRequest = { showCreateFolderDialog = false },
-            title = { Text("Create New Folder") },
-            text = {
-                OutlinedTextField(
-                    value = folderNameToCreate,
-                    onValueChange = { folderNameToCreate = it },
-                    label = { Text("Folder Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (folderNameToCreate.isNotBlank()) {
-                            viewModel.createFolderInExplorer(folderNameToCreate)
-                        }
-                        showCreateFolderDialog = false
-                        folderNameToCreate = ""
-                    },
-                    enabled = folderNameToCreate.isNotBlank()
-                ) {
-                    Text("Create")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showCreateFolderDialog = false
-                    folderNameToCreate = ""
-                }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    // Explorer Create File Dialog
-    if (showCreateFileInExplorerDialog) {
-        AlertDialog(
-            onDismissRequest = { showCreateFileInExplorerDialog = false },
-            title = { Text("Create New File") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = fileNameToCreate,
-                        onValueChange = { fileNameToCreate = it },
-                        label = { Text("File Name (e.g. sample.txt)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = fileContentToCreate,
-                        onValueChange = { fileContentToCreate = it },
-                        label = { Text("Content") },
-                        modifier = Modifier.fillMaxWidth().height(100.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (fileNameToCreate.isNotBlank()) {
-                            viewModel.createFileInExplorer(fileNameToCreate, fileContentToCreate)
-                        }
-                        showCreateFileInExplorerDialog = false
-                        fileNameToCreate = ""
-                        fileContentToCreate = ""
-                    },
-                    enabled = fileNameToCreate.isNotBlank()
-                ) {
-                    Text("Create")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showCreateFileInExplorerDialog = false
-                    fileNameToCreate = ""
-                    fileContentToCreate = ""
-                }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    // Explorer Rename Item Dialog
-    if (showRenameExplorerItemDialog != null) {
-        val targetFile = showRenameExplorerItemDialog!!
-        AlertDialog(
-            onDismissRequest = { showRenameExplorerItemDialog = null },
-            title = { Text("Rename Item") },
-            text = {
-                OutlinedTextField(
-                    value = itemNewName,
-                    onValueChange = { itemNewName = it },
-                    label = { Text("New Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (itemNewName.isNotBlank() && itemNewName != targetFile.name) {
-                            viewModel.renameExplorerItem(targetFile, itemNewName)
-                        }
-                        showRenameExplorerItemDialog = null
-                        itemNewName = ""
-                    },
-                    enabled = itemNewName.isNotBlank()
-                ) {
-                    Text("Rename")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showRenameExplorerItemDialog = null
-                    itemNewName = ""
-                }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
 }
 
 @Composable
 fun FileCompareCard(
     item: FileCompareStatus,
     onCompare: () -> Unit,
-    onEdit: (isSource: Boolean) -> Unit,
-    onDelete: (isSource: Boolean) -> Unit
+    onEdit: (Boolean) -> Unit,
+    onDelete: (Boolean) -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCompare() },
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
@@ -932,13 +815,13 @@ fun FileCompareCard(
                 Text(
                     text = buildString {
                         if (item.status != FileStatus.ADDED) {
-                            append("Src: ${formatSize(item.sizeOriginal)}")
+                            append("Original: ${formatSize(item.sizeOriginal)}")
                         }
                         if (item.status == FileStatus.MODIFIED) {
                             append(" ➔ ")
                         }
                         if (item.status != FileStatus.DELETED) {
-                            append("Mod: ${formatSize(item.sizeModified)}")
+                            append("Modified: ${formatSize(item.sizeModified)}")
                         }
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -962,7 +845,6 @@ fun FileCompareCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // In-App file edit actions
                 Row {
                     if (item.status != FileStatus.ADDED && !item.isBinary) {
                         TextButton(
@@ -971,7 +853,7 @@ fun FileCompareCard(
                         ) {
                             Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Edit Src", fontSize = 11.sp)
+                            Text("Edit Original", fontSize = 11.sp)
                         }
                     }
                     if (item.status != FileStatus.DELETED && !item.isBinary) {
@@ -981,7 +863,7 @@ fun FileCompareCard(
                         ) {
                             Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Edit Mod", fontSize = 11.sp)
+                            Text("Edit Modified", fontSize = 11.sp)
                         }
                     }
                 }

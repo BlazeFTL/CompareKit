@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,6 +26,10 @@ enum class DiffViewMode {
     SPLIT, UNIFIED
 }
 
+enum class PickerTarget {
+    NONE, ORIGINAL, MODIFIED
+}
+
 class CompareViewModel : ViewModel() {
 
     private val _isProcessing = MutableStateFlow(false)
@@ -36,10 +41,10 @@ class CompareViewModel : ViewModel() {
     private val _modifiedDir = MutableStateFlow<File?>(null)
     val modifiedDir: StateFlow<File?> = _modifiedDir.asStateFlow()
 
-    private val _sourceName = MutableStateFlow("Original (Demo)")
+    private val _sourceName = MutableStateFlow("")
     val sourceName: StateFlow<String> = _sourceName.asStateFlow()
 
-    private val _modifiedName = MutableStateFlow("Modified (Demo)")
+    private val _modifiedName = MutableStateFlow("")
     val modifiedName: StateFlow<String> = _modifiedName.asStateFlow()
 
     private val _fileList = MutableStateFlow<List<FileCompareStatus>>(emptyList())
@@ -75,212 +80,264 @@ class CompareViewModel : ViewModel() {
 
     private val tempDirsToCleanup = mutableListOf<File>()
 
-    // In-App File Explorer State
-    private val _currentExplorerDir = MutableStateFlow<File?>(null)
-    val currentExplorerDir: StateFlow<File?> = _currentExplorerDir.asStateFlow()
+    // NEW SAF STATES
+    private val _safRootUri = MutableStateFlow<String?>(null)
+    val safRootUri: StateFlow<String?> = _safRootUri.asStateFlow()
 
-    private val _explorerFiles = MutableStateFlow<List<File>>(emptyList())
-    val explorerFiles: StateFlow<List<File>> = _explorerFiles.asStateFlow()
+    private val _currentSafDir = MutableStateFlow<DocumentFile?>(null)
+    val currentSafDir: StateFlow<DocumentFile?> = _currentSafDir.asStateFlow()
+
+    private val _safFilesList = MutableStateFlow<List<DocumentFile>>(emptyList())
+    val safFilesList: StateFlow<List<DocumentFile>> = _safFilesList.asStateFlow()
+
+    private val _sourceSafUri = MutableStateFlow<String?>(null)
+    val sourceSafUri: StateFlow<String?> = _sourceSafUri.asStateFlow()
+
+    private val _sourceSafName = MutableStateFlow<String?>(null)
+    val sourceSafName: StateFlow<String?> = _sourceSafName.asStateFlow()
+
+    private val _sourceSafIsZip = MutableStateFlow(false)
+    val sourceSafIsZip: StateFlow<Boolean> = _sourceSafIsZip.asStateFlow()
+
+    private val _modifiedSafUri = MutableStateFlow<String?>(null)
+    val modifiedSafUri: StateFlow<String?> = _modifiedSafUri.asStateFlow()
+
+    private val _modifiedSafName = MutableStateFlow<String?>(null)
+    val modifiedSafName: StateFlow<String?> = _modifiedSafName.asStateFlow()
+
+    private val _modifiedSafIsZip = MutableStateFlow(false)
+    val modifiedSafIsZip: StateFlow<Boolean> = _modifiedSafIsZip.asStateFlow()
+
+    private val _activePickerTarget = MutableStateFlow(PickerTarget.NONE)
+    val activePickerTarget: StateFlow<PickerTarget> = _activePickerTarget.asStateFlow()
+
+    private val _hasRunComparison = MutableStateFlow(false)
+    val hasRunComparison: StateFlow<Boolean> = _hasRunComparison.asStateFlow()
 
     fun initExplorer(context: Context) {
-        val root = File(context.filesDir, "sandbox")
-        if (!root.exists()) {
-            root.mkdirs()
+        val prefs = context.getSharedPreferences("ComparePrefs", Context.MODE_PRIVATE)
+        val savedUriString = prefs.getString("saf_root_uri", null)
+        _safRootUri.value = savedUriString
+        if (savedUriString != null) {
+            initializeExplorerAtRoot(context)
         }
-        _currentExplorerDir.value = root
-        refreshExplorer()
     }
 
-    fun navigateToExplorerDir(dir: File) {
+    fun setSafRoot(context: Context, uri: Uri) {
+        try {
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+            
+            val prefs = context.getSharedPreferences("ComparePrefs", Context.MODE_PRIVATE)
+            prefs.edit().putString("saf_root_uri", uri.toString()).apply()
+            
+            _safRootUri.value = uri.toString()
+            initializeExplorerAtRoot(context)
+        } catch (e: Exception) {
+            _errorMessage.value = "Failed to grant storage access: ${e.localizedMessage}"
+        }
+    }
+
+    fun initializeExplorerAtRoot(context: Context) {
+        val uriString = _safRootUri.value ?: return
+        try {
+            val treeUri = Uri.parse(uriString)
+            val rootDoc = DocumentFile.fromTreeUri(context, treeUri)
+            if (rootDoc != null && rootDoc.exists() && rootDoc.isDirectory) {
+                _currentSafDir.value = rootDoc
+                refreshSafExplorer(context)
+            } else {
+                _safRootUri.value = null
+                val prefs = context.getSharedPreferences("ComparePrefs", Context.MODE_PRIVATE)
+                prefs.edit().remove("saf_root_uri").apply()
+            }
+        } catch (e: Exception) {
+            _errorMessage.value = "Failed to open storage directory: ${e.localizedMessage}"
+        }
+    }
+
+    fun refreshSafExplorer(context: Context) {
+        val current = _currentSafDir.value ?: return
+        try {
+            val files = current.listFiles().toList()
+            _safFilesList.value = files.sortedWith(compareBy({ !it.isDirectory }, { it.name?.lowercase() ?: "" }))
+        } catch (e: Exception) {
+            _errorMessage.value = "Failed to read directory content: ${e.localizedMessage}"
+        }
+    }
+
+    fun navigateUpSaf(context: Context) {
+        val current = _currentSafDir.value ?: return
+        val rootUriStr = _safRootUri.value ?: return
+        if (current.uri.toString() == rootUriStr) {
+            return
+        }
+        val parent = current.parentFile
+        if (parent != null) {
+            _currentSafDir.value = parent
+            refreshSafExplorer(context)
+        }
+    }
+
+    fun navigateToSafDir(context: Context, dir: DocumentFile) {
         if (dir.isDirectory) {
-            _currentExplorerDir.value = dir
-            refreshExplorer()
+            _currentSafDir.value = dir
+            refreshSafExplorer(context)
         }
     }
 
-    fun navigateUpExplorer(context: Context) {
-        val current = _currentExplorerDir.value ?: return
-        val root = File(context.filesDir, "sandbox")
-        if (current.absolutePath != root.absolutePath) {
-            val parent = current.parentFile
-            if (parent != null && parent.absolutePath.startsWith(root.absolutePath)) {
-                _currentExplorerDir.value = parent
-                refreshExplorer()
-            }
+    fun setActivePickerTarget(target: PickerTarget) {
+        _activePickerTarget.value = target
+    }
+
+    fun selectSafItemForTarget(context: Context, item: DocumentFile) {
+        val target = _activePickerTarget.value
+        if (target == PickerTarget.ORIGINAL) {
+            _sourceSafUri.value = item.uri.toString()
+            _sourceSafName.value = item.name ?: "Folder"
+            _sourceSafIsZip.value = item.name?.lowercase()?.endsWith(".zip") == true
+        } else if (target == PickerTarget.MODIFIED) {
+            _modifiedSafUri.value = item.uri.toString()
+            _modifiedSafName.value = item.name ?: "Folder"
+            _modifiedSafIsZip.value = item.name?.lowercase()?.endsWith(".zip") == true
         }
+        _activePickerTarget.value = PickerTarget.NONE
     }
 
-    fun refreshExplorer() {
-        val current = _currentExplorerDir.value ?: return
-        val filesList = current.listFiles()?.toList() ?: emptyList()
-        // Sort directories first, then files alphabetically
-        _explorerFiles.value = filesList.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+    fun selectCurrentSafDirForTarget(context: Context) {
+        val current = _currentSafDir.value ?: return
+        selectSafItemForTarget(context, current)
     }
 
-    fun createFolderInExplorer(name: String) {
-        val current = _currentExplorerDir.value ?: return
+    fun resetComparisonSelection() {
+        _sourceSafUri.value = null
+        _sourceSafName.value = null
+        _modifiedSafUri.value = null
+        _modifiedSafName.value = null
+        _hasRunComparison.value = false
+        _sourceDir.value = null
+        _modifiedDir.value = null
+        _fileList.value = emptyList()
+    }
+
+    fun performComparison(context: Context) {
+        val srcUriStr = _sourceSafUri.value ?: return
+        val modUriStr = _modifiedSafUri.value ?: return
+        
         viewModelScope.launch {
             _isProcessing.value = true
+            _errorMessage.value = null
             withContext(Dispatchers.IO) {
                 try {
-                    val newDir = File(current, name)
-                    newDir.mkdirs()
-                    refreshExplorer()
+                    // Prepare clean temporary directories
+                    val tempSrcDir = File(context.cacheDir, "compare_original")
+                    val tempModDir = File(context.cacheDir, "compare_modified")
+                    
+                    if (tempSrcDir.exists()) tempSrcDir.deleteRecursively()
+                    if (tempModDir.exists()) tempModDir.deleteRecursively()
+                    
+                    tempSrcDir.mkdirs()
+                    tempModDir.mkdirs()
+                    
+                    // Copy/extract Source
+                    val srcDoc = DocumentFile.fromSingleUri(context, Uri.parse(srcUriStr)) 
+                        ?: DocumentFile.fromTreeUri(context, Uri.parse(srcUriStr))
+                    
+                    if (srcDoc != null) {
+                        val isZip = _sourceSafIsZip.value
+                        if (isZip) {
+                            copyAndExtractZip(context, srcDoc, tempSrcDir)
+                        } else {
+                            copyDocumentFileToLocal(context, srcDoc, tempSrcDir)
+                        }
+                    } else {
+                        throw Exception("Could not open original item")
+                    }
+                    
+                    // Copy/extract Modified
+                    val modDoc = DocumentFile.fromSingleUri(context, Uri.parse(modUriStr))
+                        ?: DocumentFile.fromTreeUri(context, Uri.parse(modUriStr))
+                    
+                    if (modDoc != null) {
+                        val isZip = _modifiedSafIsZip.value
+                        if (isZip) {
+                            copyAndExtractZip(context, modDoc, tempModDir)
+                        } else {
+                            copyDocumentFileToLocal(context, modDoc, tempModDir)
+                        }
+                    } else {
+                        throw Exception("Could not open modified item")
+                    }
+                    
+                    // Align single files if applicable
+                    alignSingleFilesIfApplicableDirs(tempSrcDir, tempModDir)
+                    
+                    // Run comparison
+                    val comparison = FileHelper.compareDirectories(tempSrcDir, tempModDir, _diffOptions.value)
+                    
+                    _sourceDir.value = tempSrcDir
+                    _modifiedDir.value = tempModDir
+                    _fileList.value = comparison
+                    _hasRunComparison.value = true
                 } catch (e: Exception) {
-                    _errorMessage.value = "Failed to create folder: ${e.localizedMessage}"
+                    _errorMessage.value = "Failed to run comparison: ${e.localizedMessage}"
                 }
             }
             _isProcessing.value = false
         }
     }
 
-    fun createFileInExplorer(name: String, content: String) {
-        val current = _currentExplorerDir.value ?: return
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val newFile = File(current, name)
-                    newFile.writeText(content)
-                    refreshExplorer()
-                } catch (e: Exception) {
-                    _errorMessage.value = "Failed to create file: ${e.localizedMessage}"
-                }
-            }
-            _isProcessing.value = false
-        }
-    }
-
-    fun deleteExplorerItem(file: File) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    file.deleteRecursively()
-                    refreshExplorer()
-                } catch (e: Exception) {
-                    _errorMessage.value = "Failed to delete item: ${e.localizedMessage}"
-                }
-            }
-            _isProcessing.value = false
-        }
-    }
-
-    fun renameExplorerItem(file: File, newName: String) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val dest = File(file.parentFile, newName)
-                    file.renameTo(dest)
-                    refreshExplorer()
-                } catch (e: Exception) {
-                    _errorMessage.value = "Failed to rename item: ${e.localizedMessage}"
-                }
-            }
-            _isProcessing.value = false
-        }
-    }
-
-    fun importFileIntoExplorer(context: Context, uri: Uri) {
-        val current = _currentExplorerDir.value ?: return
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val fileName = getFileName(context, uri)
-                    val destFile = File(current, fileName)
-                    context.contentResolver.openInputStream(uri)?.use { ins ->
-                        destFile.outputStream().use { outs ->
+    private fun copyDocumentFileToLocal(context: Context, docFile: DocumentFile, localDir: File) {
+        if (!docFile.exists()) return
+        if (docFile.isDirectory) {
+            localDir.mkdirs()
+            docFile.listFiles().forEach { child ->
+                val childName = child.name ?: return@forEach
+                val localChild = File(localDir, childName)
+                if (child.isDirectory) {
+                    copyDocumentFileToLocal(context, child, localChild)
+                } else {
+                    context.contentResolver.openInputStream(child.uri)?.use { ins ->
+                        localChild.outputStream().use { outs ->
                             ins.copyTo(outs)
                         }
                     }
-                    refreshExplorer()
-                } catch (e: Exception) {
-                    _errorMessage.value = "Failed to import file: ${e.localizedMessage}"
                 }
             }
-            _isProcessing.value = false
-        }
-    }
-
-    fun importZipIntoExplorer(context: Context, uri: Uri) {
-        val current = _currentExplorerDir.value ?: return
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val zipName = getFileName(context, uri).substringBeforeLast(".")
-                    val destFolder = File(current, zipName)
-                    destFolder.mkdirs()
-                    if (FileHelper.extractZip(context, uri, destFolder)) {
-                        refreshExplorer()
-                    } else {
-                        _errorMessage.value = "Failed to extract ZIP content."
-                    }
-                } catch (e: Exception) {
-                    _errorMessage.value = "Failed to import ZIP: ${e.localizedMessage}"
+        } else {
+            // Single file
+            localDir.mkdirs()
+            val localChild = File(localDir, docFile.name ?: "file")
+            context.contentResolver.openInputStream(docFile.uri)?.use { ins ->
+                localChild.outputStream().use { outs ->
+                    ins.copyTo(outs)
                 }
             }
-            _isProcessing.value = false
         }
     }
 
-    fun selectExplorerAsSource(file: File) {
-        if (file.isDirectory) {
-            _sourceDir.value = file
-            _sourceName.value = file.name
-        } else {
-            // Wrap in single file comparison directory
-            val uniqueDir = File(file.parentFile?.parentFile ?: file.parentFile!!, "temp_src_file_wrap_${UUID.randomUUID().toString().take(6)}")
-            uniqueDir.mkdirs()
-            val copied = File(uniqueDir, file.name)
-            file.copyTo(copied, overwrite = true)
-            _sourceDir.value = uniqueDir
-            _sourceName.value = file.name
-            tempDirsToCleanup.add(uniqueDir)
-        }
-        alignSingleFilesIfApplicable()
-        runComparison()
-    }
-
-    fun selectExplorerAsModified(file: File) {
-        if (file.isDirectory) {
-            _modifiedDir.value = file
-            _modifiedName.value = file.name
-        } else {
-            // Wrap in single file comparison directory
-            val uniqueDir = File(file.parentFile?.parentFile ?: file.parentFile!!, "temp_mod_file_wrap_${UUID.randomUUID().toString().take(6)}")
-            uniqueDir.mkdirs()
-            val copied = File(uniqueDir, file.name)
-            file.copyTo(copied, overwrite = true)
-            _modifiedDir.value = uniqueDir
-            _modifiedName.value = file.name
-            tempDirsToCleanup.add(uniqueDir)
-        }
-        alignSingleFilesIfApplicable()
-        runComparison()
-    }
-
-    fun initializeDemoWorkspace(context: Context) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                FileHelper.prepopulateDemoWorkspace(context)
-                val sandboxDir = File(context.filesDir, "sandbox")
-                val src = File(sandboxDir, "Source")
-                val mod = File(sandboxDir, "Modified")
-                _sourceDir.value = src
-                _modifiedDir.value = mod
-                _sourceName.value = "Original (Demo)"
-                _modifiedName.value = "Modified (Demo)"
-                // Init in-app explorer state
-                _currentExplorerDir.value = sandboxDir
-                val filesList = sandboxDir.listFiles()?.toList() ?: emptyList()
-                _explorerFiles.value = filesList.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
-                runComparison()
+    private fun copyAndExtractZip(context: Context, zipDocFile: DocumentFile, localDir: File) {
+        val tempZip = File(context.cacheDir, "temp_import_${UUID.randomUUID().toString().take(6)}.zip")
+        context.contentResolver.openInputStream(zipDocFile.uri)?.use { ins ->
+            tempZip.outputStream().use { outs ->
+                ins.copyTo(outs)
             }
-            _isProcessing.value = false
+        }
+        FileHelper.extractZip(context, Uri.fromFile(tempZip), localDir)
+        tempZip.delete()
+    }
+
+    private fun alignSingleFilesIfApplicableDirs(src: File, mod: File) {
+        val srcFiles = src.listFiles()?.filter { it.isFile } ?: return
+        val modFiles = mod.listFiles()?.filter { it.isFile } ?: return
+        
+        if (srcFiles.size == 1 && modFiles.size == 1) {
+            val srcFile = srcFiles[0]
+            val modFile = modFiles[0]
+            if (srcFile.name != modFile.name) {
+                val renamedSrcFile = File(src, modFile.name)
+                srcFile.renameTo(renamedSrcFile)
+            }
         }
     }
 
@@ -295,52 +352,6 @@ class CompareViewModel : ViewModel() {
                     _fileList.value = comparison
                 } catch (e: Exception) {
                     _errorMessage.value = "Failed to run comparison: ${e.localizedMessage}"
-                }
-            }
-            _isProcessing.value = false
-        }
-    }
-
-    fun selectSourceZip(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val uniqueDirName = "zip_src_" + UUID.randomUUID().toString().take(6)
-                    val dest = File(context.cacheDir, "temp_zips/$uniqueDirName")
-                    if (FileHelper.extractZip(context, uri, dest)) {
-                        _sourceDir.value = dest
-                        _sourceName.value = "Zip: " + getFileName(context, uri)
-                        tempDirsToCleanup.add(dest)
-                        runComparison()
-                    } else {
-                        _errorMessage.value = "Failed to extract Source ZIP file."
-                    }
-                } catch (e: Exception) {
-                    _errorMessage.value = "Error: ${e.localizedMessage}"
-                }
-            }
-            _isProcessing.value = false
-        }
-    }
-
-    fun selectModifiedZip(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val uniqueDirName = "zip_mod_" + UUID.randomUUID().toString().take(6)
-                    val dest = File(context.cacheDir, "temp_zips/$uniqueDirName")
-                    if (FileHelper.extractZip(context, uri, dest)) {
-                        _modifiedDir.value = dest
-                        _modifiedName.value = "Zip: " + getFileName(context, uri)
-                        tempDirsToCleanup.add(dest)
-                        runComparison()
-                    } else {
-                        _errorMessage.value = "Failed to extract Modified ZIP file."
-                    }
-                } catch (e: Exception) {
-                    _errorMessage.value = "Error: ${e.localizedMessage}"
                 }
             }
             _isProcessing.value = false
@@ -477,222 +488,8 @@ class CompareViewModel : ViewModel() {
         }
     }
 
-    fun resetToDemoWorkspace(context: Context) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                val sandboxDir = File(context.filesDir, "sandbox")
-                if (sandboxDir.exists()) {
-                    sandboxDir.deleteRecursively()
-                }
-                initializeDemoWorkspace(context)
-            }
-            _isProcessing.value = false
-        }
-    }
-
     fun clearErrorMessage() {
         _errorMessage.value = null
-    }
-
-    private fun getFileName(context: Context, uri: Uri): String {
-        var name: String? = null
-        if (uri.scheme == "content") {
-            try {
-                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex != -1) {
-                            name = cursor.getString(nameIndex)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                // fallback
-            }
-        }
-        if (name == null) {
-            name = uri.path
-            val cut = name?.lastIndexOf('/') ?: -1
-            if (cut != -1) {
-                name = name?.substring(cut + 1)
-            }
-        }
-        return name ?: "unknown"
-    }
-
-    fun selectSourceFolder(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val folderName = getFileName(context, uri)
-                    val uniqueDirName = "folder_src_" + UUID.randomUUID().toString().take(6)
-                    val dest = File(context.cacheDir, "temp_folders/$uniqueDirName")
-                    dest.mkdirs()
-                    
-                    val rootDoc = DocumentFile.fromTreeUri(context, uri)
-                    if (rootDoc != null && copyDocumentFileTree(context, rootDoc, dest)) {
-                        _sourceDir.value = dest
-                        _sourceName.value = "Folder: $folderName"
-                        tempDirsToCleanup.add(dest)
-                        alignSingleFilesIfApplicable()
-                        runComparison()
-                    } else {
-                        _errorMessage.value = "Failed to copy Source Folder contents."
-                    }
-                } catch (e: Exception) {
-                    _errorMessage.value = "Error copying Source Folder: ${e.localizedMessage}"
-                }
-            }
-            _isProcessing.value = false
-        }
-    }
-
-    fun selectModifiedFolder(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val folderName = getFileName(context, uri)
-                    val uniqueDirName = "folder_mod_" + UUID.randomUUID().toString().take(6)
-                    val dest = File(context.cacheDir, "temp_folders/$uniqueDirName")
-                    dest.mkdirs()
-                    
-                    val rootDoc = DocumentFile.fromTreeUri(context, uri)
-                    if (rootDoc != null && copyDocumentFileTree(context, rootDoc, dest)) {
-                        _modifiedDir.value = dest
-                        _modifiedName.value = "Folder: $folderName"
-                        tempDirsToCleanup.add(dest)
-                        alignSingleFilesIfApplicable()
-                        runComparison()
-                    } else {
-                        _errorMessage.value = "Failed to copy Modified Folder contents."
-                    }
-                } catch (e: Exception) {
-                    _errorMessage.value = "Error copying Modified Folder: ${e.localizedMessage}"
-                }
-            }
-            _isProcessing.value = false
-        }
-    }
-
-    fun selectSourceFile(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val fileName = getFileName(context, uri)
-                    val uniqueDirName = "file_src_" + UUID.randomUUID().toString().take(6)
-                    val destDir = File(context.cacheDir, "temp_files/$uniqueDirName")
-                    destDir.mkdirs()
-                    val destFile = File(destDir, fileName)
-                    
-                    context.contentResolver.openInputStream(uri)?.use { ins ->
-                        destFile.outputStream().use { outs ->
-                            ins.copyTo(outs)
-                        }
-                    }
-
-                    _sourceDir.value = destDir
-                    _sourceName.value = "File: $fileName"
-                    tempDirsToCleanup.add(destDir)
-                    alignSingleFilesIfApplicable()
-                    runComparison()
-                } catch (e: Exception) {
-                    _errorMessage.value = "Error copying source file: ${e.localizedMessage}"
-                }
-            }
-            _isProcessing.value = false
-        }
-    }
-
-    fun selectModifiedFile(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val fileName = getFileName(context, uri)
-                    val uniqueDirName = "file_mod_" + UUID.randomUUID().toString().take(6)
-                    val destDir = File(context.cacheDir, "temp_files/$uniqueDirName")
-                    destDir.mkdirs()
-                    val destFile = File(destDir, fileName)
-                    
-                    context.contentResolver.openInputStream(uri)?.use { ins ->
-                        destFile.outputStream().use { outs ->
-                            ins.copyTo(outs)
-                        }
-                    }
-
-                    _modifiedDir.value = destDir
-                    _modifiedName.value = "File: $fileName"
-                    tempDirsToCleanup.add(destDir)
-                    alignSingleFilesIfApplicable()
-                    runComparison()
-                } catch (e: Exception) {
-                    _errorMessage.value = "Error copying modified file: ${e.localizedMessage}"
-                }
-            }
-            _isProcessing.value = false
-        }
-    }
-
-    private fun copyDocumentFileTree(context: Context, docFile: DocumentFile, destDir: File): Boolean {
-        if (!docFile.exists()) return false
-        if (docFile.isDirectory) {
-            val list = docFile.listFiles()
-            list.forEach { child ->
-                val childName = child.name ?: return@forEach
-                if (child.isDirectory) {
-                    val subDir = File(destDir, childName)
-                    subDir.mkdirs()
-                    copyDocumentFileTree(context, child, subDir)
-                } else if (child.isFile) {
-                    val targetFile = File(destDir, childName)
-                    try {
-                        context.contentResolver.openInputStream(child.uri)?.use { ins ->
-                            targetFile.outputStream().use { outs ->
-                                ins.copyTo(outs)
-                            }
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-            }
-            return true
-        } else if (docFile.isFile) {
-            val fileName = docFile.name ?: return false
-            val targetFile = File(destDir, fileName)
-            try {
-                context.contentResolver.openInputStream(docFile.uri)?.use { ins ->
-                    targetFile.outputStream().use { outs ->
-                        ins.copyTo(outs)
-                    }
-                }
-                return true
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-        return false
-    }
-
-    private fun alignSingleFilesIfApplicable() {
-        val src = _sourceDir.value ?: return
-        val mod = _modifiedDir.value ?: return
-        
-        val srcFiles = src.listFiles()?.filter { it.isFile } ?: return
-        val modFiles = mod.listFiles()?.filter { it.isFile } ?: return
-        
-        if (srcFiles.size == 1 && modFiles.size == 1) {
-            val srcFile = srcFiles[0]
-            val modFile = modFiles[0]
-            if (srcFile.name != modFile.name) {
-                val renamedSrcFile = File(src, modFile.name)
-                srcFile.renameTo(renamedSrcFile)
-            }
-        }
     }
 
     override fun onCleared() {
