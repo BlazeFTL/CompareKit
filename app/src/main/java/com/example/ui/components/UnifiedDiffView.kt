@@ -32,16 +32,21 @@ fun UnifiedDiffView(
     listState: LazyListState,
     lineWrap: Boolean,
     fontSizeSp: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showLineNumbers: Boolean = true
 ) {
     val horizontalScrollState = rememberScrollState()
-
+ 
     val maxLineLength = remember(diffLines) {
         diffLines.maxOfOrNull { it.value.length } ?: 0
     }
     val charWidthDp = fontSizeSp * 0.62f
-    val computedWidthDp = remember(maxLineLength, fontSizeSp) {
-        val lineNumPadding = (fontSizeSp * 7f).coerceAtLeast(72f) + 40f
+    val computedWidthDp = remember(maxLineLength, fontSizeSp, showLineNumbers) {
+        val lineNumPadding = if (showLineNumbers) {
+            (fontSizeSp * 7f).coerceAtLeast(72f) + 40f
+        } else {
+            (fontSizeSp * 1.5f).coerceAtLeast(16f) + 20f
+        }
         (maxLineLength * charWidthDp + lineNumPadding).coerceAtLeast(360f).dp
     }
 
@@ -99,35 +104,37 @@ fun UnifiedDiffView(
                         .padding(vertical = 1.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Line number column widths scale with font size
-                    val lineNumColWidth = (fontSizeSp * 3.5f).coerceAtLeast(36f).dp
+                    if (showLineNumbers) {
+                        // Line number column widths scale with font size
+                        val lineNumColWidth = (fontSizeSp * 3.5f).coerceAtLeast(36f).dp
 
-                    // Original line number column
-                    Box(
-                        modifier = Modifier.width(lineNumColWidth),
-                        contentAlignment = Alignment.CenterEnd
-                    ) {
-                        Text(
-                            text = item.originalIndex?.plus(1)?.toString() ?: "",
-                            color = Color.LightGray,
-                            fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(end = 6.dp)
-                        )
-                    }
+                        // Original line number column
+                        Box(
+                            modifier = Modifier.width(lineNumColWidth),
+                            contentAlignment = Alignment.CenterEnd
+                        ) {
+                            Text(
+                                text = item.originalIndex?.plus(1)?.toString() ?: "",
+                                color = Color.LightGray,
+                                fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(end = 6.dp)
+                            )
+                        }
 
-                    // Revised line number column
-                    Box(
-                        modifier = Modifier.width(lineNumColWidth),
-                        contentAlignment = Alignment.CenterEnd
-                    ) {
-                        Text(
-                            text = item.revisedIndex?.plus(1)?.toString() ?: "",
-                            color = Color.LightGray,
-                            fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(end = 6.dp)
-                        )
+                        // Revised line number column
+                        Box(
+                            modifier = Modifier.width(lineNumColWidth),
+                            contentAlignment = Alignment.CenterEnd
+                        ) {
+                            Text(
+                                text = item.revisedIndex?.plus(1)?.toString() ?: "",
+                                color = Color.LightGray,
+                                fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(end = 6.dp)
+                            )
+                        }
                     }
 
                     // Prefix indicator

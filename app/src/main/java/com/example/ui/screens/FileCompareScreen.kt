@@ -50,7 +50,10 @@ fun FileCompareScreen(
 
     var showGoToLineDialog by remember { mutableStateOf(false) }
     var goToLineText by remember { mutableStateOf("") }
-    var lineWrapEnabled by remember { mutableStateOf(false) }
+    var lineWrapEnabled by remember { mutableStateOf(true) } // Code Wrapping Turn On By Default
+    var showLineNumbers by remember { mutableStateOf(true) } // Option to Hide Line Numbers
+    var isSearchExpanded by remember { mutableStateOf(false) } // Pop out Search option
+    var showMenu by remember { mutableStateOf(false) } // Control Three-Dot Menu
     var fontSize by remember { mutableStateOf(13f) } // Dynamic zoom size
     var showSettingsDialog by remember { mutableStateOf(false) }
 
@@ -118,47 +121,94 @@ fun FileCompareScreen(
                     }
                 },
                 actions = {
-                    // Zoom Out Button
-                    IconButton(onClick = { if (fontSize > 8f) fontSize -= 1f }) {
-                        Icon(imageVector = Icons.Default.ZoomOut, contentDescription = "Zoom Out")
-                    }
-                    // Zoom In Button
-                    IconButton(onClick = { if (fontSize < 30f) fontSize += 1f }) {
-                        Icon(imageVector = Icons.Default.ZoomIn, contentDescription = "Zoom In")
-                    }
-                    // Line wrapping toggle
-                    IconButton(
-                        onClick = { lineWrapEnabled = !lineWrapEnabled },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            contentColor = if (lineWrapEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.WrapText,
-                            contentDescription = "Toggle Line Wrapping"
-                        )
-                    }
-                    // Comparison Settings Button
-                    IconButton(onClick = { showSettingsDialog = true }) {
-                        Icon(imageVector = Icons.Default.Settings, contentDescription = "Comparison Settings")
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Box {
+                        IconButton(onClick = { showMenu = !showMenu }) {
+                            Icon(imageVector = Icons.Default.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            // Search Action (Click opens the pop-out search bar!)
+                            DropdownMenuItem(
+                                text = { Text(if (isSearchExpanded) "Hide Search" else "Search") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                onClick = {
+                                    isSearchExpanded = !isSearchExpanded
+                                    showMenu = false
+                                }
+                            )
 
-                    // View Mode Switcher Row
-                    Text("Split", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 4.dp))
-                    Switch(
-                        checked = viewMode == DiffViewMode.UNIFIED,
-                        onCheckedChange = { isUnified ->
-                            viewModel.setDiffViewMode(if (isUnified) DiffViewMode.UNIFIED else DiffViewMode.SPLIT)
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = MaterialTheme.colorScheme.primary,
-                            checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                            uncheckedThumbColor = MaterialTheme.colorScheme.secondary,
-                            uncheckedTrackColor = MaterialTheme.colorScheme.secondaryContainer
-                        )
-                    )
-                    Text("Unified", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 4.dp, end = 8.dp))
+                            // Diff View Mode Selector
+                            DropdownMenuItem(
+                                text = { Text(if (viewMode == DiffViewMode.UNIFIED) "Switch to Split View" else "Switch to Unified View") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (viewMode == DiffViewMode.UNIFIED) Icons.Default.ViewWeek else Icons.Default.ViewStream,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    viewModel.setDiffViewMode(if (viewMode == DiffViewMode.UNIFIED) DiffViewMode.SPLIT else DiffViewMode.UNIFIED)
+                                    showMenu = false
+                                }
+                            )
+
+                            // Line Wrapping Toggle
+                            DropdownMenuItem(
+                                text = { Text(if (lineWrapEnabled) "Disable Line Wrapping" else "Enable Line Wrapping") },
+                                leadingIcon = { Icon(Icons.Default.WrapText, contentDescription = null) },
+                                onClick = {
+                                    lineWrapEnabled = !lineWrapEnabled
+                                    showMenu = false
+                                }
+                            )
+
+                            // Line Numbers Toggle
+                            DropdownMenuItem(
+                                text = { Text(if (showLineNumbers) "Hide Line Numbers" else "Show Line Numbers") },
+                                leadingIcon = { Icon(Icons.Default.FormatListNumbered, contentDescription = null) },
+                                onClick = {
+                                    showLineNumbers = !showLineNumbers
+                                    showMenu = false
+                                }
+                            )
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                            // Zoom In
+                            DropdownMenuItem(
+                                text = { Text("Zoom In") },
+                                leadingIcon = { Icon(Icons.Default.ZoomIn, contentDescription = null) },
+                                onClick = {
+                                    if (fontSize < 40f) fontSize = (fontSize + 2f).coerceAtMost(40f)
+                                    showMenu = false
+                                }
+                            )
+
+                            // Zoom Out
+                            DropdownMenuItem(
+                                text = { Text("Zoom Out") },
+                                leadingIcon = { Icon(Icons.Default.ZoomOut, contentDescription = null) },
+                                onClick = {
+                                    if (fontSize > 3f) fontSize = (fontSize - 2f).coerceAtLeast(3f)
+                                    showMenu = false
+                                }
+                            )
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                            // Settings Dialog Action
+                            DropdownMenuItem(
+                                text = { Text("Comparison Settings") },
+                                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                onClick = {
+                                    showSettingsDialog = true
+                                    showMenu = false
+                                }
+                            )
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -172,7 +222,7 @@ fun FileCompareScreen(
                 .padding(innerPadding)
         ) {
             // ABOVE: Navigation Controls & Search Row
-            if (!fileItem.isBinary) {
+            AnimatedVisibility(visible = !fileItem.isBinary && isSearchExpanded) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -245,6 +295,18 @@ fun FileCompareScreen(
                         ) {
                             Icon(imageVector = Icons.Default.KeyboardArrowDown, contentDescription = "Next Match")
                         }
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    // Close button to collapse the search view
+                    IconButton(
+                        onClick = {
+                            isSearchExpanded = false
+                            viewModel.updateActiveFileSearchQuery("")
+                        }
+                    ) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close Search")
                     }
                 }
             }
@@ -355,6 +417,7 @@ fun FileCompareScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
+                    .background(Color(0xFFFAFAFA)) // Set container background to prevent showing theme pink background on max zoom out
                     .pointerInput(Unit) {
                         awaitPointerEventScope {
                             while (true) {
@@ -362,7 +425,7 @@ fun FileCompareScreen(
                                 if (event.changes.size > 1) {
                                     val zoomFactor = event.calculateZoom()
                                     if (zoomFactor != 1f) {
-                                        fontSize = (fontSize * zoomFactor).coerceIn(8f, 30f)
+                                        fontSize = (fontSize * zoomFactor).coerceIn(3f, 40f) // Allow even more zoom out down to 3f like a website
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
@@ -423,6 +486,7 @@ fun FileCompareScreen(
                             listState = listState,
                             lineWrap = lineWrapEnabled,
                             fontSizeSp = fontSize,
+                            showLineNumbers = showLineNumbers,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -433,6 +497,7 @@ fun FileCompareScreen(
                             listState = listState,
                             lineWrap = lineWrapEnabled,
                             fontSizeSp = fontSize,
+                            showLineNumbers = showLineNumbers,
                             modifier = Modifier.fillMaxSize()
                         )
                     }

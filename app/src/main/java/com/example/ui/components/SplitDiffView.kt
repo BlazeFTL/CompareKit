@@ -77,7 +77,8 @@ fun SplitDiffView(
     listState: LazyListState,
     lineWrap: Boolean,
     fontSizeSp: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showLineNumbers: Boolean = true
 ) {
     val splitRows = SplitAligner.align(diffLines)
     val horizontalScrollState = rememberScrollState()
@@ -90,8 +91,12 @@ fun SplitDiffView(
     }
     val maxHalfLength = maxOf(maxLeftLength, maxRightLength)
     val charWidthDp = fontSizeSp * 0.62f
-    val computedHalfWidthDp = remember(maxHalfLength, fontSizeSp) {
-        val cellNumPadding = (fontSizeSp * 3f).coerceAtLeast(30f) + 20f
+    val computedHalfWidthDp = remember(maxHalfLength, fontSizeSp, showLineNumbers) {
+        val cellNumPadding = if (showLineNumbers) {
+            (fontSizeSp * 3f).coerceAtLeast(30f) + 20f
+        } else {
+            20f
+        }
         (maxHalfLength * charWidthDp + cellNumPadding).coerceAtLeast(180f)
     }
     val computedTotalWidthDp = (computedHalfWidthDp * 2).dp
@@ -130,7 +135,8 @@ fun SplitDiffView(
                             filename = filename,
                             searchQuery = searchQuery,
                             lineWrap = lineWrap,
-                            fontSizeSp = fontSizeSp
+                            fontSizeSp = fontSizeSp,
+                            showLineNumbers = showLineNumbers
                         )
                     }
 
@@ -154,7 +160,8 @@ fun SplitDiffView(
                             filename = filename,
                             searchQuery = searchQuery,
                             lineWrap = lineWrap,
-                            fontSizeSp = fontSizeSp
+                            fontSizeSp = fontSizeSp,
+                            showLineNumbers = showLineNumbers
                         )
                     }
                 }
@@ -170,7 +177,8 @@ private fun CellView(
     filename: String,
     searchQuery: String,
     lineWrap: Boolean,
-    fontSizeSp: Float
+    fontSizeSp: Float,
+    showLineNumbers: Boolean
 ) {
     if (item == null) {
         // Empty cell for alignment spacing
@@ -198,19 +206,21 @@ private fun CellView(
             .padding(vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Line number inside cell
-        val lineNumColWidth = (fontSizeSp * 3f).coerceAtLeast(30f).dp
-        Box(
-            modifier = Modifier.width(lineNumColWidth),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            Text(
-                text = numText,
-                color = Color.LightGray,
-                fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(end = 6.dp)
-            )
+        if (showLineNumbers) {
+            // Line number inside cell
+            val lineNumColWidth = (fontSizeSp * 3f).coerceAtLeast(30f).dp
+            Box(
+                modifier = Modifier.width(lineNumColWidth),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Text(
+                    text = numText,
+                    color = Color.LightGray,
+                    fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+            }
         }
 
         // Line Content
