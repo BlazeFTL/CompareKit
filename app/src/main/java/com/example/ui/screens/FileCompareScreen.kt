@@ -508,6 +508,8 @@ fun FileCompareScreen(
                             lineWrap = lineWrapEnabled,
                             fontSizeSp = fontSize,
                             showLineNumbers = showLineNumbers,
+                            activeChangePointer = currentChangePointer,
+                            changeBlocks = changeBlocks,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -519,6 +521,8 @@ fun FileCompareScreen(
                             lineWrap = lineWrapEnabled,
                             fontSizeSp = fontSize,
                             showLineNumbers = showLineNumbers,
+                            activeChangePointer = currentChangePointer,
+                            changeBlocks = changeBlocks,
                             modifier = Modifier.fillMaxSize()
                         )
                     }

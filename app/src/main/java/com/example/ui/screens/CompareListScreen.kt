@@ -197,6 +197,59 @@ fun CompareListScreen(
                         }
                     },
                     actions = {
+                        // Theme Selection Dropdown (Always visible on Home Page)
+                        var showThemeMenu by remember { mutableStateOf(false) }
+                        val currentTheme by viewModel.appTheme.collectAsState()
+
+                        Box {
+                            IconButton(onClick = { showThemeMenu = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Palette, 
+                                    contentDescription = "Choose Theme",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showThemeMenu,
+                                onDismissRequest = { showThemeMenu = false }
+                            ) {
+                                com.example.ui.theme.AppTheme.values().forEach { theme ->
+                                    DropdownMenuItem(
+                                        text = { 
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                // Small color indicator circle
+                                                val indicatorColor = when (theme) {
+                                                    com.example.ui.theme.AppTheme.SLATE -> Color(0xFF475569)
+                                                    com.example.ui.theme.AppTheme.MIDNIGHT -> Color(0xFF4F46E5)
+                                                    com.example.ui.theme.AppTheme.FOREST -> Color(0xFF059669)
+                                                    com.example.ui.theme.AppTheme.SUNSET -> Color(0xFFEA580C)
+                                                    com.example.ui.theme.AppTheme.OCEAN -> Color(0xFF0284C7)
+                                                }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clip(androidx.compose.foundation.shape.CircleShape)
+                                                        .background(indicatorColor)
+                                                )
+                                                Text(
+                                                    text = theme.displayName,
+                                                    fontWeight = if (currentTheme == theme) FontWeight.Bold else FontWeight.Normal,
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            viewModel.setAppTheme(theme)
+                                            showThemeMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
                         if (hasRunComparison) {
                             IconButton(onClick = { isSearchActive = true }) {
                                 Icon(imageVector = Icons.Default.Search, contentDescription = "Search Files")

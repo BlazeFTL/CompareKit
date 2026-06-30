@@ -28,7 +28,8 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     setContent {
-      MyApplicationTheme {
+      val appTheme by compareViewModel.appTheme.collectAsState()
+      MyApplicationTheme(appTheme = appTheme) {
         val selectedFile by compareViewModel.selectedFile.collectAsState()
         val compareListState = rememberLazyListState()
 

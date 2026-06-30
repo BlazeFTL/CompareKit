@@ -33,9 +33,24 @@ fun UnifiedDiffView(
     lineWrap: Boolean,
     fontSizeSp: Float,
     modifier: Modifier = Modifier,
-    showLineNumbers: Boolean = true
+    showLineNumbers: Boolean = true,
+    activeChangePointer: Int = -1,
+    changeBlocks: List<Int> = emptyList()
 ) {
     val horizontalScrollState = rememberScrollState()
+
+    val activeBlockLineRange = remember(activeChangePointer, changeBlocks, diffLines) {
+        if (activeChangePointer in changeBlocks.indices) {
+            val start = changeBlocks[activeChangePointer]
+            var end = start
+            while (end < diffLines.size && diffLines[end].type != DiffType.EQUAL) {
+                end++
+            }
+            start until end
+        } else {
+            IntRange.EMPTY
+        }
+    }
  
     val maxLineLength = remember(diffLines) {
         diffLines.maxOfOrNull { it.value.length } ?: 0
@@ -97,13 +112,24 @@ fun UnifiedDiffView(
                     DiffType.EQUAL -> Color.Gray
                 }
 
+                val isActiveLine = index in activeBlockLineRange
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .height(IntrinsicSize.Min)
                         .background(bgColor)
                         .padding(vertical = 1.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Thick visual accent bar for active change blocks
+                    Box(
+                        modifier = Modifier
+                            .width(5.dp)
+                            .fillMaxHeight()
+                            .background(if (isActiveLine) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    )
+
                     if (showLineNumbers) {
                         // Line number column widths scale with font size
                         val lineNumColWidth = (fontSizeSp * 3.5f).coerceAtLeast(36f).dp
@@ -115,7 +141,8 @@ fun UnifiedDiffView(
                         ) {
                             Text(
                                 text = item.originalIndex?.plus(1)?.toString() ?: "",
-                                color = Color.LightGray,
+                                color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
                                 fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
                                 fontFamily = FontFamily.Monospace,
                                 modifier = Modifier.padding(end = 6.dp)
@@ -129,7 +156,8 @@ fun UnifiedDiffView(
                         ) {
                             Text(
                                 text = item.revisedIndex?.plus(1)?.toString() ?: "",
-                                color = Color.LightGray,
+                                color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
                                 fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
                                 fontFamily = FontFamily.Monospace,
                                 modifier = Modifier.padding(end = 6.dp)

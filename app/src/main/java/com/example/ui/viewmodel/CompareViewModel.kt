@@ -15,6 +15,7 @@ import com.example.diff.Prettier
 import com.example.file.FileCompareStatus
 import com.example.file.FileHelper
 import com.example.file.FileStatus
+import com.example.ui.theme.AppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,6 +83,9 @@ class CompareViewModel : ViewModel() {
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    private val _appTheme = MutableStateFlow(AppTheme.SLATE)
+    val appTheme: StateFlow<AppTheme> = _appTheme.asStateFlow()
 
     private val tempDirsToCleanup = mutableListOf<File>()
 
@@ -380,6 +384,10 @@ class CompareViewModel : ViewModel() {
 
     fun setLineWrapEnabled(enabled: Boolean) {
         _lineWrapEnabled.value = enabled
+    }
+
+    fun setAppTheme(theme: AppTheme) {
+        _appTheme.value = theme
     }
 
     fun updateActiveFileSearchQuery(query: String) {

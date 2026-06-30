@@ -2,6 +2,7 @@ package com.example.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -18,23 +19,56 @@ private val LightColorScheme =
     primary = Purple40,
     secondary = PurpleGrey40,
     tertiary = Pink40,
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
   )
+
+fun AppTheme.getColorScheme(darkTheme: Boolean): ColorScheme {
+    val palette = when (this) {
+        AppTheme.SLATE -> if (darkTheme) ThemePalettes.SlateDark else ThemePalettes.SlateLight
+        AppTheme.MIDNIGHT -> if (darkTheme) ThemePalettes.MidnightDark else ThemePalettes.MidnightLight
+        AppTheme.FOREST -> if (darkTheme) ThemePalettes.ForestDark else ThemePalettes.ForestLight
+        AppTheme.SUNSET -> if (darkTheme) ThemePalettes.SunsetDark else ThemePalettes.SunsetLight
+        AppTheme.OCEAN -> if (darkTheme) ThemePalettes.OceanDark else ThemePalettes.OceanLight
+    }
+
+    return if (darkTheme) {
+        darkColorScheme(
+            primary = palette.primary,
+            secondary = palette.secondary,
+            tertiary = palette.tertiary,
+            background = palette.background,
+            surface = palette.surface,
+            onPrimary = palette.onPrimary,
+            onSecondary = palette.onSecondary,
+            onBackground = palette.onBackground,
+            onSurface = palette.onSurface,
+            surfaceVariant = palette.surface,
+            onSurfaceVariant = palette.onSurface,
+            outline = palette.secondary.copy(alpha = 0.5f)
+        )
+    } else {
+        lightColorScheme(
+            primary = palette.primary,
+            secondary = palette.secondary,
+            tertiary = palette.tertiary,
+            background = palette.background,
+            surface = palette.surface,
+            onPrimary = palette.onPrimary,
+            onSecondary = palette.onSecondary,
+            onBackground = palette.onBackground,
+            onSurface = palette.onSurface,
+            surfaceVariant = palette.background,
+            onSurfaceVariant = palette.onBackground,
+            outline = palette.secondary.copy(alpha = 0.3f)
+        )
+    }
+}
 
 @Composable
 fun MyApplicationTheme(
   darkTheme: Boolean = isSystemInDarkTheme(),
-  // Dynamic color is available on Android 12+
-  dynamicColor: Boolean = true,
+  appTheme: AppTheme = AppTheme.SLATE,
+  // Use custom theme colors by default
+  dynamicColor: Boolean = false,
   content: @Composable () -> Unit,
 ) {
   val colorScheme =
@@ -44,9 +78,9 @@ fun MyApplicationTheme(
         if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
       }
 
-      darkTheme -> DarkColorScheme
-      else -> LightColorScheme
+      else -> appTheme.getColorScheme(darkTheme)
     }
 
   MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
 }
+

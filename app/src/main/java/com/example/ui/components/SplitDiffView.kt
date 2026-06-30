@@ -78,10 +78,25 @@ fun SplitDiffView(
     lineWrap: Boolean,
     fontSizeSp: Float,
     modifier: Modifier = Modifier,
-    showLineNumbers: Boolean = true
+    showLineNumbers: Boolean = true,
+    activeChangePointer: Int = -1,
+    changeBlocks: List<Int> = emptyList()
 ) {
     val splitRows = SplitAligner.align(diffLines)
     val horizontalScrollState = rememberScrollState()
+
+    val activeBlockLineRange = remember(activeChangePointer, changeBlocks, diffLines) {
+        if (activeChangePointer in changeBlocks.indices) {
+            val start = changeBlocks[activeChangePointer]
+            var end = start
+            while (end < diffLines.size && diffLines[end].type != DiffType.EQUAL) {
+                end++
+            }
+            start until end
+        } else {
+            IntRange.EMPTY
+        }
+    }
 
     val maxLeftLength = remember(splitRows) {
         splitRows.maxOfOrNull { it.leftItem?.value?.length ?: 0 } ?: 0
@@ -118,6 +133,11 @@ fun SplitDiffView(
                 .background(Color(0xFFFAFAFA))
         ) {
             itemsIndexed(splitRows) { rowIndex, row ->
+                val leftIndex = row.leftItem?.let { diffLines.indexOf(it) } ?: -1
+                val rightIndex = row.rightItem?.let { diffLines.indexOf(it) } ?: -1
+                val isLeftActive = leftIndex in activeBlockLineRange
+                val isRightActive = rightIndex in activeBlockLineRange
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -136,7 +156,8 @@ fun SplitDiffView(
                             searchQuery = searchQuery,
                             lineWrap = lineWrap,
                             fontSizeSp = fontSizeSp,
-                            showLineNumbers = showLineNumbers
+                            showLineNumbers = showLineNumbers,
+                            isActiveLine = isLeftActive
                         )
                     }
 
@@ -161,7 +182,8 @@ fun SplitDiffView(
                             searchQuery = searchQuery,
                             lineWrap = lineWrap,
                             fontSizeSp = fontSizeSp,
-                            showLineNumbers = showLineNumbers
+                            showLineNumbers = showLineNumbers,
+                            isActiveLine = isRightActive
                         )
                     }
                 }
@@ -178,7 +200,8 @@ private fun CellView(
     searchQuery: String,
     lineWrap: Boolean,
     fontSizeSp: Float,
-    showLineNumbers: Boolean
+    showLineNumbers: Boolean,
+    isActiveLine: Boolean = false
 ) {
     if (item == null) {
         // Empty cell for alignment spacing
@@ -186,7 +209,17 @@ private fun CellView(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xFFF5F5F5))
-        )
+        ) {
+            if (isActiveLine) {
+                // Keep the active indicator strip visible on the empty cell side if it's active
+                Box(
+                    modifier = Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+            }
+        }
         return
     }
 
@@ -206,6 +239,14 @@ private fun CellView(
             .padding(vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Thick visual accent bar for active change blocks
+        Box(
+            modifier = Modifier
+                .width(4.dp)
+                .fillMaxHeight()
+                .background(if (isActiveLine) MaterialTheme.colorScheme.primary else Color.Transparent)
+        )
+
         if (showLineNumbers) {
             // Line number inside cell
             val lineNumColWidth = (fontSizeSp * 3f).coerceAtLeast(30f).dp
@@ -215,7 +256,8 @@ private fun CellView(
             ) {
                 Text(
                     text = numText,
-                    color = Color.LightGray,
+                    color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color.LightGray,
+                    fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
                     fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(end = 6.dp)
