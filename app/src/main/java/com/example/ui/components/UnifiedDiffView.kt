@@ -30,6 +30,7 @@ fun UnifiedDiffView(
     searchQuery: String,
     listState: LazyListState,
     lineWrap: Boolean,
+    fontSizeSp: Float,
     modifier: Modifier = Modifier
 ) {
     val horizontalScrollState = rememberScrollState()
@@ -51,42 +52,33 @@ fun UnifiedDiffView(
                 .background(Color(0xFFFAFAFA))
         ) {
             itemsIndexed(diffLines) { index, item ->
-                val isMatch = searchQuery.isNotEmpty() && item.value.contains(searchQuery, ignoreCase = true)
-                
-                // Choose background colors based on change type
+                // Choose line background color based on change type
                 val bgColor = when (item.type) {
-                    DiffType.INSERT -> Color(0xFFE6FFEC) // Light green
-                    DiffType.DELETE -> Color(0xFFFFEBEE) // Light red
+                    DiffType.INSERT -> Color(0xFFE8F5E9) // Soft Green
+                    DiffType.DELETE -> Color(0xFFFFEBEE) // Soft Red
                     DiffType.MODIFIED -> {
-                        // Alternate based on original vs revised index presence
-                        if (item.originalIndex != null && item.revisedIndex != null) {
-                            // This indicates modified
-                            if (item.subHighlights != null) {
-                                // If it represents original side of modification
-                                Color(0xFFFDE8E8) 
-                            } else {
-                                Color(0xFFEAFaf1)
-                            }
-                        } else if (item.originalIndex != null) {
-                            Color(0xFFFDE8E8) // Reddish
+                        if (item.originalIndex != null) {
+                            Color(0xFFFFF3E0) // Soft Amber/Yellow for original side of modification
                         } else {
-                            Color(0xFFEAFaf1) // Greenish
+                            Color(0xFFE3F2FD) // Soft Blue/Cyan for revised side of modification
                         }
                     }
-                    DiffType.EQUAL -> if (isMatch) Color(0xFFFFF9C4) else Color.Transparent
+                    DiffType.EQUAL -> Color.Transparent
                 }
 
+                // Prefix character
                 val prefix = when (item.type) {
                     DiffType.INSERT -> "+"
                     DiffType.DELETE -> "-"
-                    DiffType.MODIFIED -> if (item.originalIndex != null && item.revisedIndex != null) "M" else if (item.originalIndex != null) "-" else "+"
+                    DiffType.MODIFIED -> if (item.originalIndex != null) "-" else "+"
                     DiffType.EQUAL -> " "
                 }
 
+                // Prefix text color
                 val prefixColor = when (item.type) {
-                    DiffType.INSERT -> Color(0xFF2E7D32)
-                    DiffType.DELETE -> Color(0xFFC62828)
-                    DiffType.MODIFIED -> Color(0xFF1565C0)
+                    DiffType.INSERT -> Color(0xFF388E3C) // Dark Green
+                    DiffType.DELETE -> Color(0xFFD32F2F) // Dark Red
+                    DiffType.MODIFIED -> if (item.originalIndex != null) Color(0xFFF57C00) else Color(0xFF1976D2) // Orange / Blue
                     DiffType.EQUAL -> Color.Gray
                 }
 
@@ -94,34 +86,37 @@ fun UnifiedDiffView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(bgColor)
-                        .padding(vertical = 2.dp),
+                        .padding(vertical = 1.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Line number column widths scale with font size
+                    val lineNumColWidth = (fontSizeSp * 3.5f).coerceAtLeast(36f).dp
+
                     // Original line number column
                     Box(
-                        modifier = Modifier.width(44.dp),
+                        modifier = Modifier.width(lineNumColWidth),
                         contentAlignment = Alignment.CenterEnd
                     ) {
                         Text(
                             text = item.originalIndex?.plus(1)?.toString() ?: "",
                             color = Color.LightGray,
-                            fontSize = 11.sp,
+                            fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
                             fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(end = 8.dp)
+                            modifier = Modifier.padding(end = 6.dp)
                         )
                     }
 
                     // Revised line number column
                     Box(
-                        modifier = Modifier.width(44.dp),
+                        modifier = Modifier.width(lineNumColWidth),
                         contentAlignment = Alignment.CenterEnd
                     ) {
                         Text(
                             text = item.revisedIndex?.plus(1)?.toString() ?: "",
                             color = Color.LightGray,
-                            fontSize = 11.sp,
+                            fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
                             fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(end = 8.dp)
+                            modifier = Modifier.padding(end = 6.dp)
                         )
                     }
 
@@ -129,17 +124,17 @@ fun UnifiedDiffView(
                     Text(
                         text = prefix,
                         color = prefixColor,
-                        fontSize = 13.sp,
+                        fontSize = fontSizeSp.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
-                            .width(20.dp)
-                            .padding(start = 6.dp)
+                            .width((fontSizeSp * 1.5f).coerceAtLeast(16f).dp)
+                            .padding(start = 4.dp)
                     )
 
                     // Line text content with syntax highlighting or intra-line diff highlights
                     val rawText = item.value
-                    val annotatedText = if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
+                    val baseAnnotatedText = if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
                         // Apply character level diff highlighting
                         buildAnnotatedString {
                             append(rawText)
@@ -149,10 +144,10 @@ fun UnifiedDiffView(
                                 if (start < end) {
                                     addStyle(
                                         style = SpanStyle(
-                                            background = if (item.revisedIndex == null || item.originalIndex != null && item.subHighlights === item.subHighlights) {
-                                                Color(0xFFFF8A80).copy(alpha = 0.5f) // Darker Red highlight
+                                            background = if (item.originalIndex != null) {
+                                                Color(0xFFFFCC80) // Darker Amber highlight for deleted part
                                             } else {
-                                                Color(0xFFB9F6CA).copy(alpha = 0.6f) // Darker Green highlight
+                                                Color(0xFF90CAF9) // Darker Blue/Cyan highlight for added part
                                             },
                                             fontWeight = FontWeight.Bold
                                         ),
@@ -167,6 +162,29 @@ fun UnifiedDiffView(
                         SyntaxHighlighter.highlight(rawText, filename)
                     }
 
+                    // Overlay Bright Yellow search highlight on matching substrings
+                    val annotatedText = if (searchQuery.isNotEmpty()) {
+                        buildAnnotatedString {
+                            append(baseAnnotatedText)
+                            var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
+                            while (startIndex >= 0 && startIndex < rawText.length) {
+                                val endIndex = (startIndex + searchQuery.length).coerceAtMost(rawText.length)
+                                addStyle(
+                                    style = SpanStyle(
+                                        background = Color(0xFFFFEB3B), // Bright yellow for search matches
+                                        color = Color.Black,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    start = startIndex,
+                                    end = endIndex
+                                )
+                                startIndex = rawText.indexOf(searchQuery, startIndex + 1, ignoreCase = true)
+                            }
+                        }
+                    } else {
+                        baseAnnotatedText
+                    }
+
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -174,7 +192,7 @@ fun UnifiedDiffView(
                     ) {
                         Text(
                             text = annotatedText,
-                            fontSize = 13.sp,
+                            fontSize = fontSizeSp.sp,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurface,
                             softWrap = lineWrap

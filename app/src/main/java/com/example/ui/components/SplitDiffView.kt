@@ -7,7 +7,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -76,6 +75,7 @@ fun SplitDiffView(
     searchQuery: String,
     listState: LazyListState,
     lineWrap: Boolean,
+    fontSizeSp: Float,
     modifier: Modifier = Modifier
 ) {
     val splitRows = SplitAligner.align(diffLines)
@@ -114,7 +114,8 @@ fun SplitDiffView(
                             isLeft = true,
                             filename = filename,
                             searchQuery = searchQuery,
-                            lineWrap = lineWrap
+                            lineWrap = lineWrap,
+                            fontSizeSp = fontSizeSp
                         )
                     }
 
@@ -137,7 +138,8 @@ fun SplitDiffView(
                             isLeft = false,
                             filename = filename,
                             searchQuery = searchQuery,
-                            lineWrap = lineWrap
+                            lineWrap = lineWrap,
+                            fontSizeSp = fontSizeSp
                         )
                     }
                 }
@@ -152,7 +154,8 @@ private fun CellView(
     isLeft: Boolean,
     filename: String,
     searchQuery: String,
-    lineWrap: Boolean
+    lineWrap: Boolean,
+    fontSizeSp: Float
 ) {
     if (item == null) {
         // Empty cell for alignment spacing
@@ -164,13 +167,11 @@ private fun CellView(
         return
     }
 
-    val isMatch = searchQuery.isNotEmpty() && item.value.contains(searchQuery, ignoreCase = true)
-
     val bgColor = when (item.type) {
-        DiffType.INSERT -> if (isLeft) Color(0xFFF5F5F5) else Color(0xFFE6FFEC)
-        DiffType.DELETE -> if (isLeft) Color(0xFFFFEBEE) else Color(0xFFF5F5F5)
-        DiffType.MODIFIED -> if (isLeft) Color(0xFFFDE8E8) else Color(0xFFEAFaf1)
-        DiffType.EQUAL -> if (isMatch) Color(0xFFFFF9C4) else Color.Transparent
+        DiffType.INSERT -> if (isLeft) Color(0xFFF5F5F5) else Color(0xFFE8F5E9) // Gray vs Soft Green
+        DiffType.DELETE -> if (isLeft) Color(0xFFFFEBEE) else Color(0xFFF5F5F5) // Soft Red vs Gray
+        DiffType.MODIFIED -> if (isLeft) Color(0xFFFFF3E0) else Color(0xFFE3F2FD) // Soft Amber vs Soft Blue
+        DiffType.EQUAL -> Color.Transparent
     }
 
     val numText = if (isLeft) item.originalIndex?.plus(1)?.toString() ?: "" else item.revisedIndex?.plus(1)?.toString() ?: ""
@@ -179,18 +180,19 @@ private fun CellView(
         modifier = Modifier
             .fillMaxSize()
             .background(bgColor)
-            .padding(vertical = 2.dp),
+            .padding(vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Line number inside cell
+        val lineNumColWidth = (fontSizeSp * 3f).coerceAtLeast(30f).dp
         Box(
-            modifier = Modifier.width(36.dp),
+            modifier = Modifier.width(lineNumColWidth),
             contentAlignment = Alignment.CenterEnd
         ) {
             Text(
                 text = numText,
                 color = Color.LightGray,
-                fontSize = 10.sp,
+                fontSize = (fontSizeSp - 2f).coerceAtLeast(6f).sp,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(end = 6.dp)
             )
@@ -198,7 +200,7 @@ private fun CellView(
 
         // Line Content
         val rawText = item.value
-        val annotatedText = if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
+        val baseAnnotatedText = if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
             buildAnnotatedString {
                 append(rawText)
                 item.subHighlights.forEach { range ->
@@ -207,7 +209,11 @@ private fun CellView(
                     if (start < end) {
                         addStyle(
                             style = SpanStyle(
-                                background = if (isLeft) Color(0xFFFF8A80).copy(alpha = 0.5f) else Color(0xFFB9F6CA).copy(alpha = 0.6f),
+                                background = if (isLeft) {
+                                    Color(0xFFFFCC80) // Darker Amber highlight for deleted part
+                                } else {
+                                    Color(0xFF90CAF9) // Darker Blue/Cyan highlight for added part
+                                },
                                 fontWeight = FontWeight.Bold
                             ),
                             start = start,
@@ -220,6 +226,29 @@ private fun CellView(
             SyntaxHighlighter.highlight(rawText, filename)
         }
 
+        // Overlay Bright Yellow search highlight on matching substrings
+        val annotatedText = if (searchQuery.isNotEmpty()) {
+            buildAnnotatedString {
+                append(baseAnnotatedText)
+                var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
+                while (startIndex >= 0 && startIndex < rawText.length) {
+                    val endIndex = (startIndex + searchQuery.length).coerceAtMost(rawText.length)
+                    addStyle(
+                        style = SpanStyle(
+                            background = Color(0xFFFFEB3B), // Bright yellow for search matches
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        start = startIndex,
+                        end = endIndex
+                    )
+                    startIndex = rawText.indexOf(searchQuery, startIndex + 1, ignoreCase = true)
+                }
+            }
+        } else {
+            baseAnnotatedText
+        }
+
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -227,7 +256,7 @@ private fun CellView(
         ) {
             Text(
                 text = annotatedText,
-                fontSize = 12.sp,
+                fontSize = fontSizeSp.sp,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurface,
                 softWrap = lineWrap

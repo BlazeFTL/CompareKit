@@ -46,6 +46,7 @@ fun FileCompareScreen(
     var showGoToLineDialog by remember { mutableStateOf(false) }
     var goToLineText by remember { mutableStateOf("") }
     var lineWrapEnabled by remember { mutableStateOf(false) }
+    var fontSize by remember { mutableStateOf(13f) } // Dynamic zoom size
 
     // Find line indices of all changed lines (for Up/Down traversal)
     val changedLineIndices = remember(diffLines) {
@@ -60,6 +61,32 @@ fun FileCompareScreen(
     // Reset pointer on file change
     LaunchedEffect(selectedFile) {
         currentChangePointer = -1
+    }
+
+    // Find line indices of all search matches
+    val searchMatchLineIndices = remember(diffLines, fileSearchQuery) {
+        if (fileSearchQuery.isBlank()) emptyList<Int>()
+        else {
+            diffLines.indices.filter { idx ->
+                diffLines[idx].value.contains(fileSearchQuery, ignoreCase = true)
+            }
+        }
+    }
+
+    var currentSearchMatchPointer by remember { mutableStateOf(-1) }
+
+    // Reset search pointer on search query or file change
+    LaunchedEffect(fileSearchQuery, selectedFile) {
+        currentSearchMatchPointer = if (searchMatchLineIndices.isNotEmpty()) 0 else -1
+    }
+
+    // Auto-scroll to first search match when query is entered
+    LaunchedEffect(searchMatchLineIndices) {
+        if (searchMatchLineIndices.isNotEmpty() && currentSearchMatchPointer == 0) {
+            coroutineScope.launch {
+                listState.animateScrollToItem(searchMatchLineIndices[0])
+            }
+        }
     }
 
     Scaffold(
@@ -85,6 +112,14 @@ fun FileCompareScreen(
                     }
                 },
                 actions = {
+                    // Zoom Out Button
+                    IconButton(onClick = { if (fontSize > 8f) fontSize -= 1f }) {
+                        Icon(imageVector = Icons.Default.ZoomOut, contentDescription = "Zoom Out")
+                    }
+                    // Zoom In Button
+                    IconButton(onClick = { if (fontSize < 30f) fontSize += 1f }) {
+                        Icon(imageVector = Icons.Default.ZoomIn, contentDescription = "Zoom In")
+                    }
                     // Line wrapping toggle
                     IconButton(
                         onClick = { lineWrapEnabled = !lineWrapEnabled },
@@ -97,7 +132,7 @@ fun FileCompareScreen(
                             contentDescription = "Toggle Line Wrapping"
                         )
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
 
                     // View Mode Switcher Row
                     Text("Split", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 4.dp))
@@ -126,85 +161,39 @@ fun FileCompareScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Status bar message (Modified/Added/Deleted/Binary)
+            // Status bar message (Modified/Added/Deleted/Binary) with Diff Navigation
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val statusText = when {
                         fileItem.isBinary -> "Binary comparison"
-                        else -> "${changedLineIndices.size} changed line(s) detected"
+                        else -> "${changedLineIndices.size} change(s)"
                     }
                     Icon(
                         imageVector = if (fileItem.isBinary) Icons.Default.Image else Icons.Default.Assessment,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = statusText,
-                        fontWeight = FontWeight.Medium,
+                        fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.bodyMedium
                     )
-                }
-
-                // Go to Line Button
-                if (!fileItem.isBinary) {
-                    Row {
-                        TextButton(onClick = { showGoToLineDialog = true }) {
-                            Icon(imageVector = Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Go to Line", fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-
-            // Navigation Controls & Search Row
-            if (!fileItem.isBinary) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    // Inline search bar
-                    OutlinedTextField(
-                        value = fileSearchQuery,
-                        onValueChange = { viewModel.updateActiveFileSearchQuery(it) },
-                        placeholder = { Text("Find text...") },
-                        leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search text") },
-                        trailingIcon = {
-                            if (fileSearchQuery.isNotEmpty()) {
-                                IconButton(onClick = { viewModel.updateActiveFileSearchQuery("") }) {
-                                    Icon(imageVector = Icons.Default.Close, contentDescription = "Clear search")
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp)
-                    )
-
-                    Spacer(modifier = Modifier.width(12.dp))
 
                     // Previous / Next difference navigation arrows
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!fileItem.isBinary && changedLineIndices.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(16.dp))
                         Text(
-                            text = if (changedLineIndices.isNotEmpty()) {
-                                "${if (currentChangePointer == -1) 0 else currentChangePointer + 1}/${changedLineIndices.size}"
-                            } else {
-                                "0/0"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "${if (currentChangePointer == -1) 0 else currentChangePointer + 1}/${changedLineIndices.size}",
+                            style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(horizontal = 4.dp)
@@ -224,9 +213,14 @@ fun FileCompareScreen(
                                     }
                                 }
                             },
-                            enabled = changedLineIndices.isNotEmpty()
+                            enabled = changedLineIndices.isNotEmpty(),
+                            modifier = Modifier.size(32.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.KeyboardArrowUp, contentDescription = "Previous Change")
+                            Icon(
+                                imageVector = Icons.Default.ChevronLeft,
+                                contentDescription = "Previous Change",
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
 
                         // Next Change Button
@@ -243,9 +237,104 @@ fun FileCompareScreen(
                                     }
                                 }
                             },
-                            enabled = changedLineIndices.isNotEmpty()
+                            enabled = changedLineIndices.isNotEmpty(),
+                            modifier = Modifier.size(32.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.KeyboardArrowDown, contentDescription = "Next Change")
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Next Change",
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Go to Line Button
+                if (!fileItem.isBinary) {
+                    TextButton(
+                        onClick = { showGoToLineDialog = true },
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Go to Line", fontSize = 12.sp)
+                    }
+                }
+            }
+
+            // Navigation Controls & Search Row
+            if (!fileItem.isBinary) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Inline search bar
+                    OutlinedTextField(
+                        value = fileSearchQuery,
+                        onValueChange = { viewModel.updateActiveFileSearchQuery(it) },
+                        placeholder = { Text("Find text...") },
+                        leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search text") },
+                        trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (fileSearchQuery.isNotEmpty()) {
+                                    Text(
+                                        text = if (searchMatchLineIndices.isNotEmpty()) {
+                                            "${currentSearchMatchPointer + 1}/${searchMatchLineIndices.size}"
+                                        } else {
+                                            "0/0"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                    )
+                                    IconButton(onClick = { viewModel.updateActiveFileSearchQuery("") }) {
+                                        Icon(imageVector = Icons.Default.Close, contentDescription = "Clear search")
+                                    }
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                    )
+
+                    if (fileSearchQuery.isNotEmpty() && searchMatchLineIndices.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        // Prev Search Button
+                        IconButton(
+                            onClick = {
+                                currentSearchMatchPointer = if (currentSearchMatchPointer <= 0) {
+                                    searchMatchLineIndices.size - 1
+                                } else {
+                                    currentSearchMatchPointer - 1
+                                }
+                                coroutineScope.launch {
+                                    listState.animateScrollToItem(searchMatchLineIndices[currentSearchMatchPointer])
+                                }
+                            }
+                        ) {
+                            Icon(imageVector = Icons.Default.KeyboardArrowUp, contentDescription = "Previous Match")
+                        }
+
+                        // Next Search Button
+                        IconButton(
+                            onClick = {
+                                currentSearchMatchPointer = if (currentSearchMatchPointer == -1 || currentSearchMatchPointer >= searchMatchLineIndices.size - 1) {
+                                    0
+                                } else {
+                                    currentSearchMatchPointer + 1
+                                }
+                                coroutineScope.launch {
+                                    listState.animateScrollToItem(searchMatchLineIndices[currentSearchMatchPointer])
+                                }
+                            }
+                        ) {
+                            Icon(imageVector = Icons.Default.KeyboardArrowDown, contentDescription = "Next Match")
                         }
                     }
                 }
@@ -305,6 +394,7 @@ fun FileCompareScreen(
                             searchQuery = fileSearchQuery,
                             listState = listState,
                             lineWrap = lineWrapEnabled,
+                            fontSizeSp = fontSize,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -314,6 +404,7 @@ fun FileCompareScreen(
                             searchQuery = fileSearchQuery,
                             listState = listState,
                             lineWrap = lineWrapEnabled,
+                            fontSizeSp = fontSize,
                             modifier = Modifier.fillMaxSize()
                         )
                     }

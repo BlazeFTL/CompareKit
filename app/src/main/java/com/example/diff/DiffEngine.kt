@@ -247,7 +247,7 @@ object MyersDiff {
                             type = DiffType.MODIFIED,
                             value = current.value, // Source version of modified line
                             originalIndex = current.originalIndex,
-                            revisedIndex = next.revisedIndex,
+                            revisedIndex = null, // Set to null for original side of diff
                             subHighlights = subDiffs.first // Highlights for original version
                         )
                     )
@@ -255,7 +255,7 @@ object MyersDiff {
                         DiffItem(
                             type = DiffType.MODIFIED,
                             value = next.value, // Revised version of modified line
-                            originalIndex = current.originalIndex,
+                            originalIndex = null, // Set to null for revised side of diff
                             revisedIndex = next.revisedIndex,
                             subHighlights = subDiffs.second // Highlights for revised version
                         )
@@ -325,22 +325,15 @@ object MyersDiff {
             }
         }
 
-        // Backtrack to extract matches
-        val matches = ArrayList<Triple<Int, Int, Int>>()
+        // Backtrack to extract individual character matches strictly following the DP path
+        val matches = ArrayList<Pair<Int, Int>>()
         var i = orig.length
         var j = rev.length
         while (i > 0 && j > 0) {
             if (orig[i - 1] == rev[j - 1]) {
-                // Find length of consecutive block matches
-                val origIdx = i - 1
-                val revIdx = j - 1
-                var matchLen = 0
-                while (i > 0 && j > 0 && orig[i - 1] == rev[j - 1]) {
-                    matchLen++
-                    i--
-                    j--
-                }
-                matches.add(Triple(i, j, matchLen))
+                matches.add((i - 1) to (j - 1))
+                i--
+                j--
             } else if (dp[i - 1][j] >= dp[i][j - 1]) {
                 i--
             } else {
@@ -348,6 +341,26 @@ object MyersDiff {
             }
         }
         matches.reverse()
-        return matches
+
+        // Merge contiguous character matches into blocks
+        val merged = ArrayList<Triple<Int, Int, Int>>()
+        if (matches.isNotEmpty()) {
+            var currentOrigStart = matches[0].first
+            var currentRevStart = matches[0].second
+            var currentLen = 1
+            for (idx in 1 until matches.size) {
+                val m = matches[idx]
+                if (m.first == currentOrigStart + currentLen && m.second == currentRevStart + currentLen) {
+                    currentLen++
+                } else {
+                    merged.add(Triple(currentOrigStart, currentRevStart, currentLen))
+                    currentOrigStart = m.first
+                    currentRevStart = m.second
+                    currentLen = 1
+                }
+            }
+            merged.add(Triple(currentOrigStart, currentRevStart, currentLen))
+        }
+        return merged
     }
 }

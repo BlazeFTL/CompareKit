@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -26,7 +27,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.documentfile.provider.DocumentFile
 import com.example.file.FileCompareStatus
 import com.example.file.FileStatus
 import com.example.ui.components.CreateFileDialog
@@ -43,18 +43,23 @@ fun CompareListScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    
+
+    // Check storage permission on start
+    LaunchedEffect(Unit) {
+        viewModel.initExplorer(context)
+    }
+
     // Viewmodel State Collections
-    val safRootUri by viewModel.safRootUri.collectAsState()
-    val currentSafDir by viewModel.currentSafDir.collectAsState()
-    val safFilesList by viewModel.safFilesList.collectAsState()
-    
-    val sourceSafName by viewModel.sourceSafName.collectAsState()
-    val modifiedSafName by viewModel.modifiedSafName.collectAsState()
-    
+    val hasStorageAccess by viewModel.hasStorageAccess.collectAsState()
+    val currentExplorerDir by viewModel.currentExplorerDir.collectAsState()
+    val explorerFilesList by viewModel.explorerFilesList.collectAsState()
+
+    val sourceName by viewModel.sourceName.collectAsState()
+    val modifiedName by viewModel.modifiedName.collectAsState()
+
     val activePickerTarget by viewModel.activePickerTarget.collectAsState()
     val hasRunComparison by viewModel.hasRunComparison.collectAsState()
-    
+
     val isProcessing by viewModel.isProcessing.collectAsState()
     val sourceDir by viewModel.sourceDir.collectAsState()
     val modifiedDir by viewModel.modifiedDir.collectAsState()
@@ -67,17 +72,49 @@ fun CompareListScreen(
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
-    
+
     // Inline file editor state
     var editingFileStatus by remember { mutableStateOf<FileCompareStatus?>(null) }
     var editingIsSource by remember { mutableStateOf(true) }
     var editingFileContent by remember { mutableStateOf("") }
 
-    // Launcher for Authorization / ACTION_OPEN_DOCUMENT_TREE
-    val safDirectoryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.setSafRoot(context, it) }
+    // Activity launcher for Android 11+ All Files Access Settings
+    val allFilesSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        viewModel.checkStorageAccess(context)
+        if (viewModel.hasStorageAccess.value) {
+            viewModel.initExplorer(context)
+        }
+    }
+
+    // Permission launcher for Android 10 and below legacy storage permission
+    val legacyStoragePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[android.Manifest.permission.READ_EXTERNAL_STORAGE] == true
+        if (granted) {
+            viewModel.checkStorageAccess(context)
+            viewModel.initExplorer(context)
+        }
+    }
+
+    val requestStorageAccess: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val intent = viewModel.requestStorageAccessIntent(context)
+            if (intent != null) {
+                allFilesSettingsLauncher.launch(intent)
+            } else {
+                viewModel.checkStorageAccess(context)
+            }
+        } else {
+            legacyStoragePermissionLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                )
+            )
+        }
     }
 
     Scaffold(
@@ -105,13 +142,13 @@ fun CompareListScreen(
                             Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
                         }
                     }
-                    if (safRootUri != null) {
+                    if (hasStorageAccess && activePickerTarget != PickerTarget.NONE) {
                         IconButton(
-                            onClick = { safDirectoryLauncher.launch(null) }
+                            onClick = { viewModel.refreshExplorer() }
                         ) {
                             Icon(
-                                imageVector = Icons.Default.FolderSpecial,
-                                contentDescription = "Change Root Folder",
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Refresh Folder",
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -140,8 +177,8 @@ fun CompareListScreen(
                 .padding(innerPadding)
         ) {
             when {
-                // PHASE 1: NO STORAGE ACCESS - Ask for SAF on First Launch
-                safRootUri == null -> {
+                // PHASE 1: NO STORAGE ACCESS - Ask for All Files Access on First Launch
+                !hasStorageAccess -> {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -151,33 +188,33 @@ fun CompareListScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.FolderOpen,
-                            contentDescription = "Storage Folder Required",
+                            contentDescription = "Storage Access Required",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(80.dp)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            "Storage Access Required",
-                            style = MaterialTheme.typography.headlineSmall,
+                            "All Files Access Required",
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "To pick and compare files, grant access to a folder on your device. This sets up an inbuilt, offline file explorer.",
+                            "This application functions as a full-featured, offline file browser and diff tool. It requires All Files Access to let you select, browse, and compare any local files or folders on your device.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(24.dp))
                         Button(
-                            onClick = { safDirectoryLauncher.launch(null) },
+                            onClick = requestStorageAccess,
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
                         ) {
                             Icon(Icons.Default.LockOpen, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Grant Storage Access", fontWeight = FontWeight.Bold)
+                            Text("Grant All Files Access", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -225,10 +262,10 @@ fun CompareListScreen(
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
-                            val isAtRoot = currentSafDir?.uri?.toString() == safRootUri
+                            val isAtRoot = currentExplorerDir?.absolutePath == viewModel.storageRoot.absolutePath
                             if (!isAtRoot) {
                                 IconButton(
-                                    onClick = { viewModel.navigateUpSaf(context) },
+                                    onClick = { viewModel.navigateUpExplorer() },
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(Icons.Default.ArrowBack, contentDescription = "Up", modifier = Modifier.size(20.dp))
@@ -238,14 +275,16 @@ fun CompareListScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (isAtRoot) "Storage Root" else (currentSafDir?.name ?: "Current Folder"),
+                                text = if (isAtRoot) "Device Storage" else (currentExplorerDir?.name ?: "Current Folder"),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             // Choose current directory button
                             TextButton(
-                                onClick = { viewModel.selectCurrentSafDirForTarget(context) }
+                                onClick = { viewModel.selectCurrentExplorerDirForTarget() }
                             ) {
                                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -256,7 +295,7 @@ fun CompareListScreen(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         // Explorer Files List
-                        if (safFilesList.isEmpty()) {
+                        if (explorerFilesList.isEmpty()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -276,16 +315,16 @@ fun CompareListScreen(
                                     .weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                items(safFilesList) { file ->
-                                    val isZip = file.name?.lowercase()?.endsWith(".zip") == true
+                                items(explorerFilesList) { file ->
+                                    val isZip = file.name.lowercase().endsWith(".zip")
                                     val isDir = file.isDirectory
-                                    
+
                                     val icon = when {
                                         isDir -> Icons.Default.Folder
                                         isZip -> Icons.Default.FolderZip
                                         else -> Icons.Default.Description
                                     }
-                                    
+
                                     val tint = when {
                                         isDir -> MaterialTheme.colorScheme.secondary
                                         isZip -> MaterialTheme.colorScheme.primary
@@ -299,7 +338,7 @@ fun CompareListScreen(
                                         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
                                         onClick = {
                                             if (isDir) {
-                                                viewModel.navigateToSafDir(context, file)
+                                                viewModel.navigateToExplorerDir(file)
                                             }
                                         }
                                     ) {
@@ -318,7 +357,7 @@ fun CompareListScreen(
                                             Spacer(modifier = Modifier.width(12.dp))
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    text = file.name ?: "Unnamed",
+                                                    text = file.name,
                                                     style = MaterialTheme.typography.bodyMedium,
                                                     fontWeight = FontWeight.Medium,
                                                     maxLines = 1,
@@ -332,7 +371,7 @@ fun CompareListScreen(
                                             }
                                             // Select Item action
                                             Button(
-                                                onClick = { viewModel.selectSafItemForTarget(context, file) },
+                                                onClick = { viewModel.selectExplorerItemForTarget(file) },
                                                 colors = ButtonDefaults.buttonColors(
                                                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer
@@ -353,7 +392,7 @@ fun CompareListScreen(
                 // PHASE 3: MAIN VIEW (Split into selection and actual comparison lists)
                 else -> {
                     Column(modifier = Modifier.fillMaxSize()) {
-                        
+
                         // IF COMPARISON HAS RUN: Show Comparison Banner
                         if (hasRunComparison) {
                             Card(
@@ -381,7 +420,7 @@ fun CompareListScreen(
                                         )
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = "$sourceSafName  ➔  $modifiedSafName",
+                                            text = "$sourceName  ➔  $modifiedName",
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Bold,
                                             maxLines = 1,
@@ -427,9 +466,9 @@ fun CompareListScreen(
                                         .fillMaxWidth()
                                         .clickable { viewModel.setActivePickerTarget(PickerTarget.ORIGINAL) },
                                     colors = CardDefaults.cardColors(
-                                        containerColor = if (sourceSafName != null) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                        containerColor = if (sourceName != null) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                                     ),
-                                    border = BorderStroke(1.dp, if (sourceSafName != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                    border = BorderStroke(1.dp, if (sourceName != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ) {
                                     Row(
                                         modifier = Modifier
@@ -453,10 +492,10 @@ fun CompareListScreen(
                                             )
                                             Spacer(modifier = Modifier.height(2.dp))
                                             Text(
-                                                text = sourceSafName ?: "No item selected",
+                                                text = sourceName ?: "No item selected",
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = if (sourceSafName != null) MaterialTheme.colorScheme.secondary else Color.Gray,
-                                                fontWeight = if (sourceSafName != null) FontWeight.SemiBold else FontWeight.Normal,
+                                                color = if (sourceName != null) MaterialTheme.colorScheme.secondary else Color.Gray,
+                                                fontWeight = if (sourceName != null) FontWeight.SemiBold else FontWeight.Normal,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -477,9 +516,9 @@ fun CompareListScreen(
                                         .fillMaxWidth()
                                         .clickable { viewModel.setActivePickerTarget(PickerTarget.MODIFIED) },
                                     colors = CardDefaults.cardColors(
-                                        containerColor = if (modifiedSafName != null) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                        containerColor = if (modifiedName != null) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                                     ),
-                                    border = BorderStroke(1.dp, if (modifiedSafName != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                    border = BorderStroke(1.dp, if (modifiedName != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ) {
                                     Row(
                                         modifier = Modifier
@@ -503,10 +542,10 @@ fun CompareListScreen(
                                             )
                                             Spacer(modifier = Modifier.height(2.dp))
                                             Text(
-                                                text = modifiedSafName ?: "No item selected",
+                                                text = modifiedName ?: "No item selected",
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = if (modifiedSafName != null) MaterialTheme.colorScheme.primary else Color.Gray,
-                                                fontWeight = if (modifiedSafName != null) FontWeight.SemiBold else FontWeight.Normal,
+                                                color = if (modifiedName != null) MaterialTheme.colorScheme.primary else Color.Gray,
+                                                fontWeight = if (modifiedName != null) FontWeight.SemiBold else FontWeight.Normal,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -522,7 +561,7 @@ fun CompareListScreen(
                                 Spacer(modifier = Modifier.height(32.dp))
 
                                 // COMPARE NOW BUTTON (Visible once both choices are loaded)
-                                if (sourceSafName != null && modifiedSafName != null) {
+                                if (sourceName != null && modifiedName != null) {
                                     Button(
                                         onClick = { viewModel.performComparison(context) },
                                         shape = RoundedCornerShape(12.dp),
@@ -581,7 +620,7 @@ fun CompareListScreen(
                             ) {
                                 val statuses = listOf(null, FileStatus.MODIFIED, FileStatus.ADDED, FileStatus.DELETED, FileStatus.UNCHANGED)
                                 val labels = listOf("All Files", "Modified", "Added", "Deleted", "Unchanged")
-                                
+
                                 statuses.forEachIndexed { idx, status ->
                                     val selected = statusFilter == status
                                     FilterChip(

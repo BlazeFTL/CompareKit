@@ -3,6 +3,9 @@ package com.example.ui.viewmodel
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.diff.DiffItem
@@ -18,7 +21,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.util.UUID
 
@@ -40,12 +42,6 @@ class CompareViewModel : ViewModel() {
 
     private val _modifiedDir = MutableStateFlow<File?>(null)
     val modifiedDir: StateFlow<File?> = _modifiedDir.asStateFlow()
-
-    private val _sourceName = MutableStateFlow("")
-    val sourceName: StateFlow<String> = _sourceName.asStateFlow()
-
-    private val _modifiedName = MutableStateFlow("")
-    val modifiedName: StateFlow<String> = _modifiedName.asStateFlow()
 
     private val _fileList = MutableStateFlow<List<FileCompareStatus>>(emptyList())
     val fileList: StateFlow<List<FileCompareStatus>> = _fileList.asStateFlow()
@@ -80,33 +76,33 @@ class CompareViewModel : ViewModel() {
 
     private val tempDirsToCleanup = mutableListOf<File>()
 
-    // NEW SAF STATES
-    private val _safRootUri = MutableStateFlow<String?>(null)
-    val safRootUri: StateFlow<String?> = _safRootUri.asStateFlow()
+    // STORAGE ACCESS AND INBUILT EXPLORER STATES
+    private val _hasStorageAccess = MutableStateFlow(false)
+    val hasStorageAccess: StateFlow<Boolean> = _hasStorageAccess.asStateFlow()
 
-    private val _currentSafDir = MutableStateFlow<DocumentFile?>(null)
-    val currentSafDir: StateFlow<DocumentFile?> = _currentSafDir.asStateFlow()
+    private val _currentExplorerDir = MutableStateFlow<File?>(null)
+    val currentExplorerDir: StateFlow<File?> = _currentExplorerDir.asStateFlow()
 
-    private val _safFilesList = MutableStateFlow<List<DocumentFile>>(emptyList())
-    val safFilesList: StateFlow<List<DocumentFile>> = _safFilesList.asStateFlow()
+    private val _explorerFilesList = MutableStateFlow<List<File>>(emptyList())
+    val explorerFilesList: StateFlow<List<File>> = _explorerFilesList.asStateFlow()
 
-    private val _sourceSafUri = MutableStateFlow<String?>(null)
-    val sourceSafUri: StateFlow<String?> = _sourceSafUri.asStateFlow()
+    private val _sourceFile = MutableStateFlow<File?>(null)
+    val sourceFile: StateFlow<File?> = _sourceFile.asStateFlow()
 
-    private val _sourceSafName = MutableStateFlow<String?>(null)
-    val sourceSafName: StateFlow<String?> = _sourceSafName.asStateFlow()
+    private val _sourceName = MutableStateFlow<String?>(null)
+    val sourceName: StateFlow<String?> = _sourceName.asStateFlow()
 
-    private val _sourceSafIsZip = MutableStateFlow(false)
-    val sourceSafIsZip: StateFlow<Boolean> = _sourceSafIsZip.asStateFlow()
+    private val _sourceIsZip = MutableStateFlow(false)
+    val sourceIsZip: StateFlow<Boolean> = _sourceIsZip.asStateFlow()
 
-    private val _modifiedSafUri = MutableStateFlow<String?>(null)
-    val modifiedSafUri: StateFlow<String?> = _modifiedSafUri.asStateFlow()
+    private val _modifiedFile = MutableStateFlow<File?>(null)
+    val modifiedFile: StateFlow<File?> = _modifiedFile.asStateFlow()
 
-    private val _modifiedSafName = MutableStateFlow<String?>(null)
-    val modifiedSafName: StateFlow<String?> = _modifiedSafName.asStateFlow()
+    private val _modifiedName = MutableStateFlow<String?>(null)
+    val modifiedName: StateFlow<String?> = _modifiedName.asStateFlow()
 
-    private val _modifiedSafIsZip = MutableStateFlow(false)
-    val modifiedSafIsZip: StateFlow<Boolean> = _modifiedSafIsZip.asStateFlow()
+    private val _modifiedIsZip = MutableStateFlow(false)
+    val modifiedIsZip: StateFlow<Boolean> = _modifiedIsZip.asStateFlow()
 
     private val _activePickerTarget = MutableStateFlow(PickerTarget.NONE)
     val activePickerTarget: StateFlow<PickerTarget> = _activePickerTarget.asStateFlow()
@@ -114,75 +110,78 @@ class CompareViewModel : ViewModel() {
     private val _hasRunComparison = MutableStateFlow(false)
     val hasRunComparison: StateFlow<Boolean> = _hasRunComparison.asStateFlow()
 
+    // Base storage root directory
+    val storageRoot: File
+        get() = Environment.getExternalStorageDirectory()
+
+    fun checkStorageAccess(context: Context): Boolean {
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        _hasStorageAccess.value = granted
+        return granted
+    }
+
+    fun requestStorageAccessIntent(context: Context): Intent? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+            } catch (e: Exception) {
+                Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+            }
+        } else {
+            null // Handle via standard ActivityCompat requestPermissions in UI
+        }
+    }
+
     fun initExplorer(context: Context) {
-        val prefs = context.getSharedPreferences("ComparePrefs", Context.MODE_PRIVATE)
-        val savedUriString = prefs.getString("saf_root_uri", null)
-        _safRootUri.value = savedUriString
-        if (savedUriString != null) {
-            initializeExplorerAtRoot(context)
+        val hasAccess = checkStorageAccess(context)
+        if (hasAccess) {
+            _currentExplorerDir.value = storageRoot
+            refreshExplorer()
         }
     }
 
-    fun setSafRoot(context: Context, uri: Uri) {
+    fun refreshExplorer() {
+        val current = _currentExplorerDir.value ?: return
         try {
-            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            context.contentResolver.takePersistableUriPermission(uri, takeFlags)
-            
-            val prefs = context.getSharedPreferences("ComparePrefs", Context.MODE_PRIVATE)
-            prefs.edit().putString("saf_root_uri", uri.toString()).apply()
-            
-            _safRootUri.value = uri.toString()
-            initializeExplorerAtRoot(context)
-        } catch (e: Exception) {
-            _errorMessage.value = "Failed to grant storage access: ${e.localizedMessage}"
-        }
-    }
-
-    fun initializeExplorerAtRoot(context: Context) {
-        val uriString = _safRootUri.value ?: return
-        try {
-            val treeUri = Uri.parse(uriString)
-            val rootDoc = DocumentFile.fromTreeUri(context, treeUri)
-            if (rootDoc != null && rootDoc.exists() && rootDoc.isDirectory) {
-                _currentSafDir.value = rootDoc
-                refreshSafExplorer(context)
+            if (current.exists() && current.isDirectory) {
+                val files = current.listFiles()?.toList() ?: emptyList()
+                _explorerFilesList.value = files.sortedWith(
+                    compareBy({ !it.isDirectory }, { it.name.lowercase() })
+                )
             } else {
-                _safRootUri.value = null
-                val prefs = context.getSharedPreferences("ComparePrefs", Context.MODE_PRIVATE)
-                prefs.edit().remove("saf_root_uri").apply()
+                _explorerFilesList.value = emptyList()
             }
         } catch (e: Exception) {
-            _errorMessage.value = "Failed to open storage directory: ${e.localizedMessage}"
+            _errorMessage.value = "Failed to list folder contents: ${e.localizedMessage}"
         }
     }
 
-    fun refreshSafExplorer(context: Context) {
-        val current = _currentSafDir.value ?: return
-        try {
-            val files = current.listFiles().toList()
-            _safFilesList.value = files.sortedWith(compareBy({ !it.isDirectory }, { it.name?.lowercase() ?: "" }))
-        } catch (e: Exception) {
-            _errorMessage.value = "Failed to read directory content: ${e.localizedMessage}"
-        }
-    }
-
-    fun navigateUpSaf(context: Context) {
-        val current = _currentSafDir.value ?: return
-        val rootUriStr = _safRootUri.value ?: return
-        if (current.uri.toString() == rootUriStr) {
+    fun navigateUpExplorer() {
+        val current = _currentExplorerDir.value ?: return
+        val rootPath = storageRoot.absolutePath
+        if (current.absolutePath == rootPath) {
             return
         }
         val parent = current.parentFile
         if (parent != null) {
-            _currentSafDir.value = parent
-            refreshSafExplorer(context)
+            _currentExplorerDir.value = parent
+            refreshExplorer()
         }
     }
 
-    fun navigateToSafDir(context: Context, dir: DocumentFile) {
+    fun navigateToExplorerDir(dir: File) {
         if (dir.isDirectory) {
-            _currentSafDir.value = dir
-            refreshSafExplorer(context)
+            _currentExplorerDir.value = dir
+            refreshExplorer()
         }
     }
 
@@ -190,30 +189,30 @@ class CompareViewModel : ViewModel() {
         _activePickerTarget.value = target
     }
 
-    fun selectSafItemForTarget(context: Context, item: DocumentFile) {
+    fun selectExplorerItemForTarget(item: File) {
         val target = _activePickerTarget.value
         if (target == PickerTarget.ORIGINAL) {
-            _sourceSafUri.value = item.uri.toString()
-            _sourceSafName.value = item.name ?: "Folder"
-            _sourceSafIsZip.value = item.name?.lowercase()?.endsWith(".zip") == true
+            _sourceFile.value = item
+            _sourceName.value = item.name
+            _sourceIsZip.value = item.name.lowercase().endsWith(".zip")
         } else if (target == PickerTarget.MODIFIED) {
-            _modifiedSafUri.value = item.uri.toString()
-            _modifiedSafName.value = item.name ?: "Folder"
-            _modifiedSafIsZip.value = item.name?.lowercase()?.endsWith(".zip") == true
+            _modifiedFile.value = item
+            _modifiedName.value = item.name
+            _modifiedIsZip.value = item.name.lowercase().endsWith(".zip")
         }
         _activePickerTarget.value = PickerTarget.NONE
     }
 
-    fun selectCurrentSafDirForTarget(context: Context) {
-        val current = _currentSafDir.value ?: return
-        selectSafItemForTarget(context, current)
+    fun selectCurrentExplorerDirForTarget() {
+        val current = _currentExplorerDir.value ?: return
+        selectExplorerItemForTarget(current)
     }
 
     fun resetComparisonSelection() {
-        _sourceSafUri.value = null
-        _sourceSafName.value = null
-        _modifiedSafUri.value = null
-        _modifiedSafName.value = null
+        _sourceFile.value = null
+        _sourceName.value = null
+        _modifiedFile.value = null
+        _modifiedName.value = null
         _hasRunComparison.value = false
         _sourceDir.value = null
         _modifiedDir.value = null
@@ -221,60 +220,54 @@ class CompareViewModel : ViewModel() {
     }
 
     fun performComparison(context: Context) {
-        val srcUriStr = _sourceSafUri.value ?: return
-        val modUriStr = _modifiedSafUri.value ?: return
-        
+        val srcFile = _sourceFile.value ?: return
+        val modFile = _modifiedFile.value ?: return
+
         viewModelScope.launch {
             _isProcessing.value = true
             _errorMessage.value = null
             withContext(Dispatchers.IO) {
                 try {
-                    // Prepare clean temporary directories
+                    // Prepare clean temporary sandbox directories in cache
                     val tempSrcDir = File(context.cacheDir, "compare_original")
                     val tempModDir = File(context.cacheDir, "compare_modified")
-                    
+
                     if (tempSrcDir.exists()) tempSrcDir.deleteRecursively()
                     if (tempModDir.exists()) tempModDir.deleteRecursively()
-                    
+
                     tempSrcDir.mkdirs()
                     tempModDir.mkdirs()
-                    
+
                     // Copy/extract Source
-                    val srcDoc = DocumentFile.fromSingleUri(context, Uri.parse(srcUriStr)) 
-                        ?: DocumentFile.fromTreeUri(context, Uri.parse(srcUriStr))
-                    
-                    if (srcDoc != null) {
-                        val isZip = _sourceSafIsZip.value
+                    if (srcFile.exists()) {
+                        val isZip = _sourceIsZip.value
                         if (isZip) {
-                            copyAndExtractZip(context, srcDoc, tempSrcDir)
+                            copyAndExtractZip(context, srcFile, tempSrcDir)
                         } else {
-                            copyDocumentFileToLocal(context, srcDoc, tempSrcDir)
+                            copyLocalFileOrDir(srcFile, tempSrcDir)
                         }
                     } else {
-                        throw Exception("Could not open original item")
+                        throw Exception("Original item does not exist or is inaccessible")
                     }
-                    
+
                     // Copy/extract Modified
-                    val modDoc = DocumentFile.fromSingleUri(context, Uri.parse(modUriStr))
-                        ?: DocumentFile.fromTreeUri(context, Uri.parse(modUriStr))
-                    
-                    if (modDoc != null) {
-                        val isZip = _modifiedSafIsZip.value
+                    if (modFile.exists()) {
+                        val isZip = _modifiedIsZip.value
                         if (isZip) {
-                            copyAndExtractZip(context, modDoc, tempModDir)
+                            copyAndExtractZip(context, modFile, tempModDir)
                         } else {
-                            copyDocumentFileToLocal(context, modDoc, tempModDir)
+                            copyLocalFileOrDir(modFile, tempModDir)
                         }
                     } else {
-                        throw Exception("Could not open modified item")
+                        throw Exception("Modified item does not exist or is inaccessible")
                     }
-                    
+
                     // Align single files if applicable
                     alignSingleFilesIfApplicableDirs(tempSrcDir, tempModDir)
-                    
+
                     // Run comparison
                     val comparison = FileHelper.compareDirectories(tempSrcDir, tempModDir, _diffOptions.value)
-                    
+
                     _sourceDir.value = tempSrcDir
                     _modifiedDir.value = tempModDir
                     _fileList.value = comparison
@@ -287,50 +280,36 @@ class CompareViewModel : ViewModel() {
         }
     }
 
-    private fun copyDocumentFileToLocal(context: Context, docFile: DocumentFile, localDir: File) {
-        if (!docFile.exists()) return
-        if (docFile.isDirectory) {
-            localDir.mkdirs()
-            docFile.listFiles().forEach { child ->
-                val childName = child.name ?: return@forEach
-                val localChild = File(localDir, childName)
-                if (child.isDirectory) {
-                    copyDocumentFileToLocal(context, child, localChild)
-                } else {
-                    context.contentResolver.openInputStream(child.uri)?.use { ins ->
-                        localChild.outputStream().use { outs ->
-                            ins.copyTo(outs)
-                        }
-                    }
-                }
+    private fun copyLocalFileOrDir(src: File, dest: File) {
+        if (!src.exists()) return
+        if (src.isDirectory) {
+            dest.mkdirs()
+            src.listFiles()?.forEach { child ->
+                val childDest = File(dest, child.name)
+                copyLocalFileOrDir(child, childDest)
             }
         } else {
-            // Single file
-            localDir.mkdirs()
-            val localChild = File(localDir, docFile.name ?: "file")
-            context.contentResolver.openInputStream(docFile.uri)?.use { ins ->
-                localChild.outputStream().use { outs ->
+            // Single file - copy into dest as a file if dest itself is meant to be the single file container,
+            // or put it inside dest if it's a folder. In our case, performComparison passes tempSrcDir/tempModDir
+            // which are containers, so we put the single file inside them with its original name.
+            val localTargetFile = File(dest, src.name)
+            localTargetFile.parentFile?.mkdirs()
+            src.inputStream().use { ins ->
+                localTargetFile.outputStream().use { outs ->
                     ins.copyTo(outs)
                 }
             }
         }
     }
 
-    private fun copyAndExtractZip(context: Context, zipDocFile: DocumentFile, localDir: File) {
-        val tempZip = File(context.cacheDir, "temp_import_${UUID.randomUUID().toString().take(6)}.zip")
-        context.contentResolver.openInputStream(zipDocFile.uri)?.use { ins ->
-            tempZip.outputStream().use { outs ->
-                ins.copyTo(outs)
-            }
-        }
-        FileHelper.extractZip(context, Uri.fromFile(tempZip), localDir)
-        tempZip.delete()
+    private fun copyAndExtractZip(context: Context, zipFile: File, localDir: File) {
+        FileHelper.extractZip(context, Uri.fromFile(zipFile), localDir)
     }
 
     private fun alignSingleFilesIfApplicableDirs(src: File, mod: File) {
         val srcFiles = src.listFiles()?.filter { it.isFile } ?: return
         val modFiles = mod.listFiles()?.filter { it.isFile } ?: return
-        
+
         if (srcFiles.size == 1 && modFiles.size == 1) {
             val srcFile = srcFiles[0]
             val modFile = modFiles[0]
@@ -399,7 +378,7 @@ class CompareViewModel : ViewModel() {
     private fun loadDiffForFile(fileStatus: FileCompareStatus) {
         val srcDir = _sourceDir.value ?: return
         val modDir = _modifiedDir.value ?: return
-        
+
         viewModelScope.launch {
             _isProcessing.value = true
             withContext(Dispatchers.IO) {
