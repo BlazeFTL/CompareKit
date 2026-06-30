@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,6 +36,15 @@ fun UnifiedDiffView(
 ) {
     val horizontalScrollState = rememberScrollState()
 
+    val maxLineLength = remember(diffLines) {
+        diffLines.maxOfOrNull { it.value.length } ?: 0
+    }
+    val charWidthDp = fontSizeSp * 0.62f
+    val computedWidthDp = remember(maxLineLength, fontSizeSp) {
+        val lineNumPadding = (fontSizeSp * 7f).coerceAtLeast(72f) + 40f
+        (maxLineLength * charWidthDp + lineNumPadding).coerceAtLeast(360f).dp
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -47,7 +57,7 @@ fun UnifiedDiffView(
             modifier = Modifier
                 .fillMaxHeight()
                 .then(
-                    if (!lineWrap) Modifier.width(1600.dp) else Modifier.fillMaxWidth()
+                    if (!lineWrap) Modifier.width(computedWidthDp) else Modifier.fillMaxWidth()
                 )
                 .background(Color(0xFFFAFAFA))
         ) {

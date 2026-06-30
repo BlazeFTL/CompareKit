@@ -22,6 +22,7 @@ import com.example.diff.DiffItem
 import com.example.diff.DiffType
 import com.example.ui.components.SplitDiffView
 import com.example.ui.components.UnifiedDiffView
+import com.example.ui.components.DiffSettingsDialog
 import com.example.ui.viewmodel.CompareViewModel
 import com.example.ui.viewmodel.DiffViewMode
 import kotlinx.coroutines.launch
@@ -37,6 +38,8 @@ fun FileCompareScreen(
     val viewMode by viewModel.activeDiffViewMode.collectAsState()
     val fileSearchQuery by viewModel.activeFileSearchQuery.collectAsState()
     val isProcessing by viewModel.isProcessing.collectAsState()
+    val diffOptions by viewModel.diffOptions.collectAsState()
+    val beautifierEnabled by viewModel.beautifierEnabled.collectAsState()
 
     val fileItem = selectedFile ?: return
 
@@ -47,6 +50,7 @@ fun FileCompareScreen(
     var goToLineText by remember { mutableStateOf("") }
     var lineWrapEnabled by remember { mutableStateOf(false) }
     var fontSize by remember { mutableStateOf(13f) } // Dynamic zoom size
+    var showSettingsDialog by remember { mutableStateOf(false) }
 
     // Find line indices of all changed lines (for Up/Down traversal)
     val changedLineIndices = remember(diffLines) {
@@ -132,6 +136,10 @@ fun FileCompareScreen(
                             contentDescription = "Toggle Line Wrapping"
                         )
                     }
+                    // Comparison Settings Button
+                    IconButton(onClick = { showSettingsDialog = true }) {
+                        Icon(imageVector = Icons.Default.Settings, contentDescription = "Comparison Settings")
+                    }
                     Spacer(modifier = Modifier.width(4.dp))
 
                     // View Mode Switcher Row
@@ -161,108 +169,7 @@ fun FileCompareScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Status bar message (Modified/Added/Deleted/Binary) with Diff Navigation
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val statusText = when {
-                        fileItem.isBinary -> "Binary comparison"
-                        else -> "${changedLineIndices.size} change(s)"
-                    }
-                    Icon(
-                        imageVector = if (fileItem.isBinary) Icons.Default.Image else Icons.Default.Assessment,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = statusText,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-
-                    // Previous / Next difference navigation arrows
-                    if (!fileItem.isBinary && changedLineIndices.isNotEmpty()) {
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Text(
-                            text = "${if (currentChangePointer == -1) 0 else currentChangePointer + 1}/${changedLineIndices.size}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        )
-
-                        // Prev Change Button
-                        IconButton(
-                            onClick = {
-                                if (changedLineIndices.isNotEmpty()) {
-                                    currentChangePointer = if (currentChangePointer <= 0) {
-                                        changedLineIndices.size - 1 // Wrap around
-                                    } else {
-                                        currentChangePointer - 1
-                                    }
-                                    coroutineScope.launch {
-                                        listState.animateScrollToItem(changedLineIndices[currentChangePointer])
-                                    }
-                                }
-                            },
-                            enabled = changedLineIndices.isNotEmpty(),
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ChevronLeft,
-                                contentDescription = "Previous Change",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // Next Change Button
-                        IconButton(
-                            onClick = {
-                                if (changedLineIndices.isNotEmpty()) {
-                                    currentChangePointer = if (currentChangePointer == -1 || currentChangePointer >= changedLineIndices.size - 1) {
-                                        0 // Wrap around or start
-                                    } else {
-                                        currentChangePointer + 1
-                                    }
-                                    coroutineScope.launch {
-                                        listState.animateScrollToItem(changedLineIndices[currentChangePointer])
-                                    }
-                                }
-                            },
-                            enabled = changedLineIndices.isNotEmpty(),
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = "Next Change",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Go to Line Button
-                if (!fileItem.isBinary) {
-                    TextButton(
-                        onClick = { showGoToLineDialog = true },
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Go to Line", fontSize = 12.sp)
-                    }
-                }
-            }
-
-            // Navigation Controls & Search Row
+            // ABOVE: Navigation Controls & Search Row
             if (!fileItem.isBinary) {
                 Row(
                     modifier = Modifier
@@ -305,7 +212,7 @@ fun FileCompareScreen(
                     if (fileSearchQuery.isNotEmpty() && searchMatchLineIndices.isNotEmpty()) {
                         Spacer(modifier = Modifier.width(8.dp))
 
-                        // Prev Search Button
+                        // Prev Search Button (UP)
                         IconButton(
                             onClick = {
                                 currentSearchMatchPointer = if (currentSearchMatchPointer <= 0) {
@@ -321,7 +228,7 @@ fun FileCompareScreen(
                             Icon(imageVector = Icons.Default.KeyboardArrowUp, contentDescription = "Previous Match")
                         }
 
-                        // Next Search Button
+                        // Next Search Button (DOWN)
                         IconButton(
                             onClick = {
                                 currentSearchMatchPointer = if (currentSearchMatchPointer == -1 || currentSearchMatchPointer >= searchMatchLineIndices.size - 1) {
@@ -335,6 +242,108 @@ fun FileCompareScreen(
                             }
                         ) {
                             Icon(imageVector = Icons.Default.KeyboardArrowDown, contentDescription = "Next Match")
+                        }
+                    }
+                }
+            }
+
+            // BELOW: Status bar message (Modified/Added/Deleted/Binary) with Diff Navigation
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val statusText = when {
+                        fileItem.isBinary -> "Binary comparison"
+                        else -> "${changedLineIndices.size} change(s)"
+                    }
+                    Icon(
+                        imageVector = if (fileItem.isBinary) Icons.Default.Image else Icons.Default.Assessment,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = statusText,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+
+                    if (!fileItem.isBinary) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        TextButton(
+                            onClick = { showGoToLineDialog = true },
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Go to Line", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                // Diff up/down scrolling buttons on the right side
+                if (!fileItem.isBinary && changedLineIndices.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "${if (currentChangePointer == -1) 0 else currentChangePointer + 1}/${changedLineIndices.size}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+
+                        // Previous difference (UP)
+                        IconButton(
+                            onClick = {
+                                if (changedLineIndices.isNotEmpty()) {
+                                    currentChangePointer = if (currentChangePointer <= 0) {
+                                        changedLineIndices.size - 1 // Wrap around
+                                    } else {
+                                        currentChangePointer - 1
+                                    }
+                                    coroutineScope.launch {
+                                        listState.animateScrollToItem(changedLineIndices[currentChangePointer])
+                                    }
+                                }
+                            },
+                            enabled = changedLineIndices.isNotEmpty(),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowUp,
+                                contentDescription = "Previous Change",
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        // Next difference (DOWN)
+                        IconButton(
+                            onClick = {
+                                if (changedLineIndices.isNotEmpty()) {
+                                    currentChangePointer = if (currentChangePointer == -1 || currentChangePointer >= changedLineIndices.size - 1) {
+                                        0 // Wrap around or start
+                                    } else {
+                                        currentChangePointer + 1
+                                    }
+                                    coroutineScope.launch {
+                                        listState.animateScrollToItem(changedLineIndices[currentChangePointer])
+                                    }
+                                }
+                            },
+                            enabled = changedLineIndices.isNotEmpty(),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Next Change",
+                                modifier = Modifier.size(24.dp)
+                            )
                         }
                     }
                 }
@@ -455,6 +464,20 @@ fun FileCompareScreen(
                 ) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    // Comparison Settings Dialog
+    if (showSettingsDialog) {
+        DiffSettingsDialog(
+            options = diffOptions,
+            beautifierEnabled = beautifierEnabled,
+            onDismiss = { showSettingsDialog = false },
+            onSave = { opts, pretty ->
+                viewModel.updateDiffOptions(opts)
+                viewModel.setBeautifierEnabled(pretty)
+                showSettingsDialog = false
             }
         )
     }

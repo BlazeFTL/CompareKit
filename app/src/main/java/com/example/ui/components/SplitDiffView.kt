@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -81,6 +82,20 @@ fun SplitDiffView(
     val splitRows = SplitAligner.align(diffLines)
     val horizontalScrollState = rememberScrollState()
 
+    val maxLeftLength = remember(splitRows) {
+        splitRows.maxOfOrNull { it.leftItem?.value?.length ?: 0 } ?: 0
+    }
+    val maxRightLength = remember(splitRows) {
+        splitRows.maxOfOrNull { it.rightItem?.value?.length ?: 0 } ?: 0
+    }
+    val maxHalfLength = maxOf(maxLeftLength, maxRightLength)
+    val charWidthDp = fontSizeSp * 0.62f
+    val computedHalfWidthDp = remember(maxHalfLength, fontSizeSp) {
+        val cellNumPadding = (fontSizeSp * 3f).coerceAtLeast(30f) + 20f
+        (maxHalfLength * charWidthDp + cellNumPadding).coerceAtLeast(180f)
+    }
+    val computedTotalWidthDp = (computedHalfWidthDp * 2).dp
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -93,7 +108,7 @@ fun SplitDiffView(
             modifier = Modifier
                 .fillMaxHeight()
                 .then(
-                    if (!lineWrap) Modifier.width(1600.dp) else Modifier.fillMaxWidth()
+                    if (!lineWrap) Modifier.width(computedTotalWidthDp) else Modifier.fillMaxWidth()
                 )
                 .background(Color(0xFFFAFAFA))
         ) {

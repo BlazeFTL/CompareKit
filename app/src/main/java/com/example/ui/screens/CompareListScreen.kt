@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -29,9 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.file.FileCompareStatus
 import com.example.file.FileStatus
-import com.example.ui.components.CreateFileDialog
 import com.example.ui.components.DiffSettingsDialog
-import com.example.ui.components.EditFileDialog
 import com.example.ui.viewmodel.CompareViewModel
 import com.example.ui.viewmodel.PickerTarget
 import java.io.File
@@ -70,13 +69,14 @@ fun CompareListScreen(
     val beautifierEnabled by viewModel.beautifierEnabled.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
-    var showCreateDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
 
-    // Inline file editor state
-    var editingFileStatus by remember { mutableStateOf<FileCompareStatus?>(null) }
-    var editingIsSource by remember { mutableStateOf(true) }
-    var editingFileContent by remember { mutableStateOf("") }
+    // Go back when in picker view if back is pressed
+    if (activePickerTarget != PickerTarget.NONE) {
+        BackHandler {
+            viewModel.setActivePickerTarget(PickerTarget.NONE)
+        }
+    }
 
     // Activity launcher for Android 11+ All Files Access Settings
     val allFilesSettingsLauncher = rememberLauncherForActivityResult(
@@ -158,17 +158,6 @@ fun CompareListScreen(
                     containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
                 )
             )
-        },
-        floatingActionButton = {
-            if (hasRunComparison) {
-                FloatingActionButton(
-                    onClick = { showCreateDialog = true },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "Create File")
-                }
-            }
         }
     ) { innerPadding ->
         Box(
@@ -686,19 +675,7 @@ fun CompareListScreen(
                                     items(filteredList) { fileStatus ->
                                         FileCompareCard(
                                             item = fileStatus,
-                                            onCompare = { viewModel.selectFileForDiff(fileStatus) },
-                                            onEdit = { isSource ->
-                                                val targetDir = if (isSource) sourceDir else modifiedDir
-                                                if (targetDir != null) {
-                                                    val targetFile = File(targetDir, fileStatus.relativePath)
-                                                    editingFileContent = if (targetFile.exists()) targetFile.readText() else ""
-                                                    editingIsSource = isSource
-                                                    editingFileStatus = fileStatus
-                                                }
-                                            },
-                                            onDelete = { isSource ->
-                                                viewModel.deleteSandboxFile(fileStatus.relativePath, isSource)
-                                            }
+                                            onCompare = { viewModel.selectFileForDiff(fileStatus) }
                                         )
                                     }
                                 }
@@ -766,27 +743,16 @@ fun CompareListScreen(
         )
     }
 
-    // CREATE FILE DIALOG (Create Sandbox file)
-    if (showCreateDialog) {
-        CreateFileDialog(
-            onDismiss = { showCreateDialog = false },
-            onCreate = { relPath, isSrc, content ->
-                viewModel.createSandboxFile(relPath, isSrc, content)
-                showCreateDialog = false
-            }
-        )
-    }
-
-    // EDIT FILE DIALOG (Edit Sandbox file)
-    if (editingFileStatus != null) {
-        EditFileDialog(
-            filename = editingFileStatus!!.relativePath,
-            initialContent = editingFileContent,
-            isSource = editingIsSource,
-            onDismiss = { editingFileStatus = null },
-            onSave = { updatedContent ->
-                viewModel.editSandboxFile(editingFileStatus!!.relativePath, editingIsSource, updatedContent)
-                editingFileStatus = null
+    // Comparison Settings Dialog
+    if (showSettingsDialog) {
+        DiffSettingsDialog(
+            options = diffOptions,
+            beautifierEnabled = beautifierEnabled,
+            onDismiss = { showSettingsDialog = false },
+            onSave = { opts, pretty ->
+                viewModel.updateDiffOptions(opts)
+                viewModel.setBeautifierEnabled(pretty)
+                showSettingsDialog = false
             }
         )
     }
@@ -795,9 +761,7 @@ fun CompareListScreen(
 @Composable
 fun FileCompareCard(
     item: FileCompareStatus,
-    onCompare: () -> Unit,
-    onEdit: (Boolean) -> Unit,
-    onDelete: (Boolean) -> Unit
+    onCompare: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -881,32 +845,9 @@ fun FileCompareCard(
             // Interactive Actions row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row {
-                    if (item.status != FileStatus.ADDED && !item.isBinary) {
-                        TextButton(
-                            onClick = { onEdit(true) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Edit Original", fontSize = 11.sp)
-                        }
-                    }
-                    if (item.status != FileStatus.DELETED && !item.isBinary) {
-                        TextButton(
-                            onClick = { onEdit(false) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Edit Modified", fontSize = 11.sp)
-                        }
-                    }
-                }
-
                 // Run Compare Button
                 Button(
                     onClick = onCompare,

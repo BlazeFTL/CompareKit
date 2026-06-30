@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -41,16 +42,16 @@ class MainActivity : ComponentActivity() {
           compareViewModel.initExplorer(applicationContext)
         }
 
-        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+        Box(modifier = Modifier.fillMaxSize()) {
           if (selectedFile == null) {
             CompareListScreen(
               viewModel = compareViewModel,
-              modifier = Modifier.padding(innerPadding)
+              modifier = Modifier.fillMaxSize()
             )
           } else {
             FileCompareScreen(
               viewModel = compareViewModel,
-              modifier = Modifier.padding(innerPadding)
+              modifier = Modifier.fillMaxSize()
             )
           }
         }

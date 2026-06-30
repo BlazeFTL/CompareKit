@@ -270,6 +270,34 @@ object MyersDiff {
         return result
     }
 
+    data class Token(val text: String, val start: Int, val end: Int)
+
+    private fun tokenizeWithOffsets(s: String): List<Token> {
+        val tokens = ArrayList<Token>()
+        val sb = StringBuilder()
+        var lastType = 0 // 1 = letter/digit, 2 = whitespace, 3 = other (punctuation)
+        var startOffset = 0
+        for (i in s.indices) {
+            val ch = s[i]
+            val type = when {
+                ch.isLetterOrDigit() -> 1
+                ch.isWhitespace() -> 2
+                else -> 3
+            }
+            if (sb.isNotEmpty() && (type != lastType || type == 3)) {
+                tokens.add(Token(sb.toString(), startOffset, i))
+                sb.setLength(0)
+                startOffset = i
+            }
+            sb.append(ch)
+            lastType = type
+        }
+        if (sb.isNotEmpty()) {
+            tokens.add(Token(sb.toString(), startOffset, s.length))
+        }
+        return tokens
+    }
+
     /**
      * Computes the character-level or word-level differences between two strings.
      * Returns a pair of highlights: (OriginalLineHighlights, RevisedLineHighlights)
@@ -277,47 +305,15 @@ object MyersDiff {
     fun computeIntraLineDiff(orig: String, rev: String): Pair<List<SubRange>, List<SubRange>> {
         if (orig.isBlank() || rev.isBlank()) return Pair(emptyList(), emptyList())
 
-        // Use a simple word-based or char-based LCS to highlight differences.
-        // For character-level details, we'll find matching blocks.
-        val common = lcs(orig, rev)
-        
-        val origHighlights = ArrayList<SubRange>()
-        val revHighlights = ArrayList<SubRange>()
+        val origTokens = tokenizeWithOffsets(orig)
+        val revTokens = tokenizeWithOffsets(rev)
 
-        // Original highlights (the characters NOT in common)
-        var lastOrigMatch = 0
-        for (match in common) {
-            if (match.first > lastOrigMatch) {
-                origHighlights.add(SubRange(lastOrigMatch, match.first))
-            }
-            lastOrigMatch = match.first + match.third
-        }
-        if (lastOrigMatch < orig.length) {
-            origHighlights.add(SubRange(lastOrigMatch, orig.length))
-        }
+        if (origTokens.isEmpty() || revTokens.isEmpty()) return Pair(emptyList(), emptyList())
 
-        // Revised highlights (the characters NOT in common)
-        var lastRevMatch = 0
-        for (match in common) {
-            if (match.second > lastRevMatch) {
-                revHighlights.add(SubRange(lastRevMatch, match.second))
-            }
-            lastRevMatch = match.second + match.third
-        }
-        if (lastRevMatch < rev.length) {
-            revHighlights.add(SubRange(lastRevMatch, rev.length))
-        }
-
-        return Pair(origHighlights, revHighlights)
-    }
-
-    // Longest Common Subsequence of characters to find matching blocks
-    // Returns List of Triple(origIndex, revIndex, matchLength)
-    private fun lcs(orig: String, rev: String): List<Triple<Int, Int, Int>> {
-        val dp = Array(orig.length + 1) { IntArray(rev.length + 1) }
-        for (i in 1..orig.length) {
-            for (j in 1..rev.length) {
-                if (orig[i - 1] == rev[j - 1]) {
+        val dp = Array(origTokens.size + 1) { IntArray(revTokens.size + 1) }
+        for (i in 1..origTokens.size) {
+            for (j in 1..revTokens.size) {
+                if (origTokens[i - 1].text == revTokens[j - 1].text) {
                     dp[i][j] = dp[i - 1][j - 1] + 1
                 } else {
                     dp[i][j] = maxOf(dp[i - 1][j], dp[i][j - 1])
@@ -325,13 +321,15 @@ object MyersDiff {
             }
         }
 
-        // Backtrack to extract individual character matches strictly following the DP path
-        val matches = ArrayList<Pair<Int, Int>>()
-        var i = orig.length
-        var j = rev.length
+        // Backtrack to extract matching tokens
+        val matches = java.util.BitSet(origTokens.size)
+        val revMatches = java.util.BitSet(revTokens.size)
+        var i = origTokens.size
+        var j = revTokens.size
         while (i > 0 && j > 0) {
-            if (orig[i - 1] == rev[j - 1]) {
-                matches.add((i - 1) to (j - 1))
+            if (origTokens[i - 1].text == revTokens[j - 1].text) {
+                matches.set(i - 1)
+                revMatches.set(j - 1)
                 i--
                 j--
             } else if (dp[i - 1][j] >= dp[i][j - 1]) {
@@ -340,27 +338,43 @@ object MyersDiff {
                 j--
             }
         }
-        matches.reverse()
 
-        // Merge contiguous character matches into blocks
-        val merged = ArrayList<Triple<Int, Int, Int>>()
-        if (matches.isNotEmpty()) {
-            var currentOrigStart = matches[0].first
-            var currentRevStart = matches[0].second
-            var currentLen = 1
-            for (idx in 1 until matches.size) {
-                val m = matches[idx]
-                if (m.first == currentOrigStart + currentLen && m.second == currentRevStart + currentLen) {
-                    currentLen++
-                } else {
-                    merged.add(Triple(currentOrigStart, currentRevStart, currentLen))
-                    currentOrigStart = m.first
-                    currentRevStart = m.second
-                    currentLen = 1
+        val origHighlights = ArrayList<SubRange>()
+        var start = -1
+        for (idx in origTokens.indices) {
+            if (!matches.get(idx)) {
+                if (start == -1) {
+                    start = origTokens[idx].start
+                }
+            } else {
+                if (start != -1) {
+                    origHighlights.add(SubRange(start, origTokens[idx - 1].end))
+                    start = -1
                 }
             }
-            merged.add(Triple(currentOrigStart, currentRevStart, currentLen))
         }
-        return merged
+        if (start != -1) {
+            origHighlights.add(SubRange(start, origTokens.last().end))
+        }
+
+        val revHighlights = ArrayList<SubRange>()
+        var startRev = -1
+        for (idx in revTokens.indices) {
+            if (!revMatches.get(idx)) {
+                if (startRev == -1) {
+                    startRev = revTokens[idx].start
+                }
+            } else {
+                if (startRev != -1) {
+                    revHighlights.add(SubRange(startRev, revTokens[idx - 1].end))
+                    startRev = -1
+                }
+            }
+        }
+        if (startRev != -1) {
+            revHighlights.add(SubRange(startRev, revTokens.last().end))
+        }
+
+        return Pair(origHighlights, revHighlights)
     }
 }
