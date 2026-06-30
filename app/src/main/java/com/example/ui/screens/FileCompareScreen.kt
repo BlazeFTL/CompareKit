@@ -58,22 +58,32 @@ fun FileCompareScreen(
     var fontSize by remember { mutableStateOf(13f) } // Dynamic zoom size
     var showSettingsDialog by remember { mutableStateOf(false) }
 
-    // Find line indices of all changed lines (for Up/Down traversal)
-    val changedLineIndices = remember(diffLines) {
-        diffLines.indices.filter { idx ->
-            diffLines[idx].type != DiffType.EQUAL
+    // Group contiguous non-equal lines into cohesive change blocks (for Up/Down traversal)
+    val changeBlocks = remember(diffLines) {
+        val blocks = mutableListOf<Int>()
+        var inBlock = false
+        diffLines.forEachIndexed { idx, item ->
+            if (item.type != DiffType.EQUAL) {
+                if (!inBlock) {
+                    blocks.add(idx)
+                    inBlock = true
+                }
+            } else {
+                inBlock = false
+            }
         }
+        blocks
     }
 
-    // Track active change index
+    // Track active change index (pointing to blocks rather than lines)
     var currentChangePointer by remember { mutableStateOf(-1) }
 
     // Reset pointer and auto-scroll to the first diff automatically
     LaunchedEffect(selectedFile, diffLines) {
-        if (changedLineIndices.isNotEmpty()) {
+        if (changeBlocks.isNotEmpty()) {
             currentChangePointer = 0
             coroutineScope.launch {
-                val targetIndex = (changedLineIndices[0] - 2).coerceAtLeast(0)
+                val targetIndex = (changeBlocks[0] - 2).coerceAtLeast(0)
                 listState.animateScrollToItem(targetIndex)
             }
         } else {
@@ -332,7 +342,7 @@ fun FileCompareScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val statusText = when {
                         fileItem.isBinary -> "Binary comparison"
-                        else -> "${changedLineIndices.size} change(s)"
+                        else -> "${changeBlocks.size} change block(s)"
                     }
                     Icon(
                         imageVector = if (fileItem.isBinary) Icons.Default.Image else Icons.Default.Assessment,
@@ -361,10 +371,10 @@ fun FileCompareScreen(
                 }
 
                 // Diff up/down scrolling buttons on the right side
-                if (!fileItem.isBinary && changedLineIndices.isNotEmpty()) {
+                if (!fileItem.isBinary && changeBlocks.isNotEmpty()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "${if (currentChangePointer == -1) 0 else currentChangePointer + 1}/${changedLineIndices.size}",
+                            text = "${if (currentChangePointer == -1) 0 else currentChangePointer + 1}/${changeBlocks.size}",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
@@ -374,18 +384,19 @@ fun FileCompareScreen(
                         // Previous difference (UP)
                         IconButton(
                             onClick = {
-                                if (changedLineIndices.isNotEmpty()) {
+                                if (changeBlocks.isNotEmpty()) {
                                     currentChangePointer = if (currentChangePointer <= 0) {
-                                        changedLineIndices.size - 1 // Wrap around
+                                        changeBlocks.size - 1 // Wrap around
                                     } else {
                                         currentChangePointer - 1
                                     }
                                     coroutineScope.launch {
-                                        listState.animateScrollToItem(changedLineIndices[currentChangePointer])
+                                        val targetIndex = (changeBlocks[currentChangePointer] - 2).coerceAtLeast(0)
+                                        listState.animateScrollToItem(targetIndex)
                                     }
                                 }
                             },
-                            enabled = changedLineIndices.isNotEmpty(),
+                            enabled = changeBlocks.isNotEmpty(),
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
@@ -398,18 +409,19 @@ fun FileCompareScreen(
                         // Next difference (DOWN)
                         IconButton(
                             onClick = {
-                                if (changedLineIndices.isNotEmpty()) {
-                                    currentChangePointer = if (currentChangePointer == -1 || currentChangePointer >= changedLineIndices.size - 1) {
+                                if (changeBlocks.isNotEmpty()) {
+                                    currentChangePointer = if (currentChangePointer == -1 || currentChangePointer >= changeBlocks.size - 1) {
                                         0 // Wrap around or start
                                     } else {
                                         currentChangePointer + 1
                                     }
                                     coroutineScope.launch {
-                                        listState.animateScrollToItem(changedLineIndices[currentChangePointer])
+                                        val targetIndex = (changeBlocks[currentChangePointer] - 2).coerceAtLeast(0)
+                                        listState.animateScrollToItem(targetIndex)
                                     }
                                 }
                             },
-                            enabled = changedLineIndices.isNotEmpty(),
+                            enabled = changeBlocks.isNotEmpty(),
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(

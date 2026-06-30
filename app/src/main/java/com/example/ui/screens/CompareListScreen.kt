@@ -77,6 +77,7 @@ fun CompareListScreen(
 
     var showSettingsDialog by remember { mutableStateOf(false) }
     var isSearchActive by remember { mutableStateOf(false) }
+    var showIgnoreField by remember { mutableStateOf(false) }
 
     // Go back when in picker view if back is pressed
     if (activePickerTarget != PickerTarget.NONE) {
@@ -180,11 +181,19 @@ fun CompareListScreen(
                                 modifier = Modifier.size(28.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                "File Compare",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium
-                            )
+                            Column {
+                                Text(
+                                    "CompareKit",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    "By BlazeFTL",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
                     },
                     actions = {
@@ -676,23 +685,46 @@ fun CompareListScreen(
                                     .padding(horizontal = 12.dp, vertical = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                var showIgnoreField by remember { mutableStateOf(false) }
-                                if (!showIgnoreField && ignoreQuery.isEmpty()) {
-                                    TextButton(
-                                        onClick = { showIgnoreField = true },
-                                        colors = ButtonDefaults.textButtonColors(
-                                            contentColor = MaterialTheme.colorScheme.primary
-                                        )
+                                if (!showIgnoreField) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Icon(imageVector = Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Hide files by name...", style = MaterialTheme.typography.bodySmall)
+                                        TextButton(
+                                            onClick = { showIgnoreField = true },
+                                            colors = ButtonDefaults.textButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.primary
+                                            ),
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        ) {
+                                            Icon(imageVector = Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (ignoreQuery.isNotEmpty()) "Filter Active: \"$ignoreQuery\"" else "Hide files by name...",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = if (ignoreQuery.isNotEmpty()) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        }
+                                        if (ignoreQuery.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            IconButton(
+                                                onClick = { viewModel.updateIgnoreQuery("") },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Clear ignore filter",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                 } else {
                                     OutlinedTextField(
                                         value = ignoreQuery,
                                         onValueChange = { viewModel.updateIgnoreQuery(it) },
-                                        label = { Text("Hide files containing (comma-separated, e.g. message.json)") },
+                                        label = { Text("Hide files containing (comma-separated, e.g. .png)") },
                                         placeholder = { Text("message.json, .png, etc.") },
                                         singleLine = true,
                                         modifier = Modifier.weight(1f),
@@ -700,9 +732,8 @@ fun CompareListScreen(
                                         trailingIcon = {
                                             IconButton(onClick = { 
                                                 showIgnoreField = false
-                                                viewModel.updateIgnoreQuery("")
                                             }) {
-                                                Icon(imageVector = Icons.Default.Visibility, contentDescription = "Clear & Hide Filter")
+                                                Icon(imageVector = Icons.Default.Close, contentDescription = "Close Ignore Panel")
                                             }
                                         }
                                     )
