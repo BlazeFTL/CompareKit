@@ -45,13 +45,14 @@ fun FileCompareScreen(
 
     val fileItem = selectedFile ?: return
 
+    val showLineNumbers by viewModel.showLineNumbers.collectAsState()
+    val lineWrapEnabled by viewModel.lineWrapEnabled.collectAsState()
+
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
     var showGoToLineDialog by remember { mutableStateOf(false) }
     var goToLineText by remember { mutableStateOf("") }
-    var lineWrapEnabled by remember { mutableStateOf(true) } // Code Wrapping Turn On By Default
-    var showLineNumbers by remember { mutableStateOf(true) } // Option to Hide Line Numbers
     var isSearchExpanded by remember { mutableStateOf(false) } // Pop out Search option
     var showMenu by remember { mutableStateOf(false) } // Control Three-Dot Menu
     var fontSize by remember { mutableStateOf(13f) } // Dynamic zoom size
@@ -67,9 +68,17 @@ fun FileCompareScreen(
     // Track active change index
     var currentChangePointer by remember { mutableStateOf(-1) }
 
-    // Reset pointer on file change
-    LaunchedEffect(selectedFile) {
-        currentChangePointer = -1
+    // Reset pointer and auto-scroll to the first diff automatically
+    LaunchedEffect(selectedFile, diffLines) {
+        if (changedLineIndices.isNotEmpty()) {
+            currentChangePointer = 0
+            coroutineScope.launch {
+                val targetIndex = (changedLineIndices[0] - 2).coerceAtLeast(0)
+                listState.animateScrollToItem(targetIndex)
+            }
+        } else {
+            currentChangePointer = -1
+        }
     }
 
     // Find line indices of all search matches
@@ -159,7 +168,7 @@ fun FileCompareScreen(
                                 text = { Text(if (lineWrapEnabled) "Disable Line Wrapping" else "Enable Line Wrapping") },
                                 leadingIcon = { Icon(Icons.Default.WrapText, contentDescription = null) },
                                 onClick = {
-                                    lineWrapEnabled = !lineWrapEnabled
+                                    viewModel.setLineWrapEnabled(!lineWrapEnabled)
                                     showMenu = false
                                 }
                             )
@@ -169,7 +178,7 @@ fun FileCompareScreen(
                                 text = { Text(if (showLineNumbers) "Hide Line Numbers" else "Show Line Numbers") },
                                 leadingIcon = { Icon(Icons.Default.FormatListNumbered, contentDescription = null) },
                                 onClick = {
-                                    showLineNumbers = !showLineNumbers
+                                    viewModel.setShowLineNumbers(!showLineNumbers)
                                     showMenu = false
                                 }
                             )

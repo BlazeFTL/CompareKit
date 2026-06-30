@@ -9,6 +9,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -67,17 +69,25 @@ fun CompareListScreen(
     val modifiedDir by viewModel.modifiedDir.collectAsState()
     val fileList by viewModel.fileList.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val ignoreQuery by viewModel.ignoreQuery.collectAsState()
     val statusFilter by viewModel.statusFilter.collectAsState()
     val diffOptions by viewModel.diffOptions.collectAsState()
     val beautifierEnabled by viewModel.beautifierEnabled.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var isSearchActive by remember { mutableStateOf(false) }
 
     // Go back when in picker view if back is pressed
     if (activePickerTarget != PickerTarget.NONE) {
+        val storageRoot = viewModel.storageRoot
         BackHandler {
-            viewModel.setActivePickerTarget(PickerTarget.NONE)
+            val current = currentExplorerDir
+            if (current != null && current.absolutePath != storageRoot.absolutePath) {
+                viewModel.navigateUpExplorer()
+            } else {
+                viewModel.setActivePickerTarget(PickerTarget.NONE)
+            }
         }
     }
 
@@ -122,45 +132,87 @@ fun CompareListScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Compare,
-                            contentDescription = "Compare Icon",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
+            if (isSearchActive) {
+                TopAppBar(
+                    title = {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { viewModel.updateSearchQuery(it) },
+                            placeholder = { Text("Search files...", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            textStyle = MaterialTheme.typography.bodyLarge,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                errorBorderColor = Color.Transparent,
+                                disabledBorderColor = Color.Transparent
+                            ),
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { viewModel.updateSearchQuery("") }) {
+                                        Icon(imageVector = Icons.Default.Close, contentDescription = "Clear")
+                                    }
+                                }
+                            }
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            "File Compare",
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
-                },
-                actions = {
-                    if (hasRunComparison) {
-                        IconButton(onClick = { showSettingsDialog = true }) {
-                            Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            isSearchActive = false
+                            viewModel.updateSearchQuery("")
+                        }) {
+                            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Close Search")
                         }
-                    }
-                    if (hasStorageAccess && activePickerTarget != PickerTarget.NONE) {
-                        IconButton(
-                            onClick = { viewModel.refreshExplorer() }
-                        ) {
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+                    )
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Refresh Folder",
-                                tint = MaterialTheme.colorScheme.primary
+                                imageVector = Icons.Default.Compare,
+                                contentDescription = "Compare Icon",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                "File Compare",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium
                             )
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+                    },
+                    actions = {
+                        if (hasRunComparison) {
+                            IconButton(onClick = { isSearchActive = true }) {
+                                Icon(imageVector = Icons.Default.Search, contentDescription = "Search Files")
+                            }
+                            IconButton(onClick = { showSettingsDialog = true }) {
+                                Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+                            }
+                        }
+                        if (hasStorageAccess && activePickerTarget != PickerTarget.NONE) {
+                            IconButton(
+                                onClick = { viewModel.refreshExplorer() }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh Folder",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+                    )
                 )
-            )
+            }
         }
     ) { innerPadding ->
         Box(
@@ -572,67 +624,105 @@ fun CompareListScreen(
                             }
                         }
 
-                        // IF COMPARISON HAS RUN: Show Search, filters, and list results
+                        // IF COMPARISON HAS RUN: Show filters and list results
                         if (hasRunComparison) {
-                            // Search Bar
+                            // Beautiful custom capsule-based row with real-time counts
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedTextField(
-                                    value = searchQuery,
-                                    onValueChange = { viewModel.updateSearchQuery(it) },
-                                    placeholder = { Text("Search files...") },
-                                    leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search") },
-                                    trailingIcon = {
-                                        if (searchQuery.isNotEmpty()) {
-                                            IconButton(onClick = { viewModel.updateSearchQuery("") }) {
-                                                Icon(imageVector = Icons.Default.Close, contentDescription = "Clear")
-                                            }
-                                        }
-                                    },
-                                    singleLine = true,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(56.dp)
-                                )
-                            }
-
-                            // Filter Chips
-                            ScrollableTabRow(
-                                selectedTabIndex = getStatusIndex(statusFilter),
-                                edgePadding = 12.dp,
-                                indicator = {},
-                                divider = {},
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
                             ) {
                                 val statuses = listOf(null, FileStatus.MODIFIED, FileStatus.ADDED, FileStatus.DELETED, FileStatus.UNCHANGED)
                                 val labels = listOf("All Files", "Modified", "Added", "Deleted", "Unchanged")
+                                val counts = listOf(
+                                    fileList.size,
+                                    fileList.count { it.status == FileStatus.MODIFIED },
+                                    fileList.count { it.status == FileStatus.ADDED },
+                                    fileList.count { it.status == FileStatus.DELETED },
+                                    fileList.count { it.status == FileStatus.UNCHANGED }
+                                )
 
                                 statuses.forEachIndexed { idx, status ->
-                                    val selected = statusFilter == status
-                                    FilterChip(
-                                        selected = selected,
-                                        onClick = { viewModel.updateStatusFilter(status) },
-                                        label = { Text(labels[idx]) },
-                                        modifier = Modifier.padding(horizontal = 4.dp),
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    val isSelected = statusFilter == status
+                                    val countText = " (${counts[idx]})"
+                                    
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(
+                                                if (isSelected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                            )
+                                            .clickable { viewModel.updateStatusFilter(status) }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = labels[idx] + countText,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                         )
+                                    }
+                                }
+                            }
+
+                            // Option to hide files by name
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                var showIgnoreField by remember { mutableStateOf(false) }
+                                if (!showIgnoreField && ignoreQuery.isEmpty()) {
+                                    TextButton(
+                                        onClick = { showIgnoreField = true },
+                                        colors = ButtonDefaults.textButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.primary
+                                        )
+                                    ) {
+                                        Icon(imageVector = Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Hide files by name...", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                } else {
+                                    OutlinedTextField(
+                                        value = ignoreQuery,
+                                        onValueChange = { viewModel.updateIgnoreQuery(it) },
+                                        label = { Text("Hide files containing (comma-separated, e.g. message.json)") },
+                                        placeholder = { Text("message.json, .png, etc.") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f),
+                                        textStyle = MaterialTheme.typography.bodyMedium,
+                                        trailingIcon = {
+                                            IconButton(onClick = { 
+                                                showIgnoreField = false
+                                                viewModel.updateIgnoreQuery("")
+                                            }) {
+                                                Icon(imageVector = Icons.Default.Visibility, contentDescription = "Clear & Hide Filter")
+                                            }
+                                        }
                                     )
                                 }
                             }
 
-                            // Filtered List
+                            // Filtered List with ignore query exclusions
+                            val ignorePatterns = remember(ignoreQuery) {
+                                ignoreQuery.split(",")
+                                    .map { it.trim().lowercase() }
+                                    .filter { it.isNotEmpty() }
+                            }
+
                             val filteredList = fileList.filter { file ->
                                 val matchQuery = file.relativePath.contains(searchQuery, ignoreCase = true)
                                 val matchStatus = statusFilter == null || file.status == statusFilter
-                                matchQuery && matchStatus
+                                val isIgnored = ignorePatterns.any { pattern ->
+                                    file.relativePath.lowercase().contains(pattern)
+                                }
+                                matchQuery && matchStatus && !isIgnored
                             }
 
                             if (filteredList.isEmpty()) {
@@ -776,90 +866,87 @@ fun FileCompareCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            // Path and badge row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // File Icon
+            val fileIcon = when {
+                item.relativePath.endsWith(".json") -> Icons.Outlined.Code
+                item.relativePath.endsWith(".html") || item.relativePath.endsWith(".xml") -> Icons.Outlined.Html
+                item.isBinary -> Icons.Outlined.Image
+                else -> Icons.Outlined.Article
+            }
+            Icon(
+                imageVector = fileIcon,
+                contentDescription = "File Type",
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.size(24.dp)
+            )
+
+            // Content Column (Path, sizes, etc.)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.relativePath,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium,
+                    softWrap = true // Allows path line breaks!
+                )
+                
+                Spacer(modifier = Modifier.height(2.dp))
+
+                // File sizes and type label
                 Row(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val fileIcon = when {
-                        item.relativePath.endsWith(".json") -> Icons.Outlined.Code
-                        item.relativePath.endsWith(".html") || item.relativePath.endsWith(".xml") -> Icons.Outlined.Html
-                        item.isBinary -> Icons.Outlined.Image
-                        else -> Icons.Outlined.Article
-                    }
-                    Icon(
-                        imageVector = fileIcon,
-                        contentDescription = "File Type",
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
                     Text(
-                        text = item.relativePath,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyMedium,
-                        overflow = TextOverflow.Ellipsis,
-                        maxLines = 1
-                    )
-                }
-
-                StatusBadge(status = item.status)
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // File sizes and type label
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = buildString {
-                        if (item.status != FileStatus.ADDED) {
-                            append("Original: ${formatSize(item.sizeOriginal)}")
-                        }
-                        if (item.status == FileStatus.MODIFIED) {
-                            append(" ➔ ")
-                        }
-                        if (item.status != FileStatus.DELETED) {
-                            append("Modified: ${formatSize(item.sizeModified)}")
-                        }
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
-                if (item.isBinary) {
-                    Text(
-                        "Binary File",
+                        text = buildString {
+                            if (item.status != FileStatus.ADDED) {
+                                append("Original: ${formatSize(item.sizeOriginal)}")
+                            }
+                            if (item.status == FileStatus.MODIFIED) {
+                                append(" ➔ ")
+                            }
+                            if (item.status != FileStatus.DELETED) {
+                                append("Modified: ${formatSize(item.sizeModified)}")
+                            }
+                        },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                        fontWeight = FontWeight.SemiBold
+                        color = Color.Gray
                     )
+                    if (item.isBinary) {
+                        Text(
+                            "Binary File",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Interactive Actions row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
+            // Actions Column (Compare button and status badge stacked on the right)
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // Run Compare Button
+                StatusBadge(status = item.status)
+
+                // Run Compare Button (Moved Above)
                 Button(
                     onClick = onCompare,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(28.dp),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.CompareArrows, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Compare", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Icon(imageVector = Icons.Default.CompareArrows, contentDescription = null, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Compare", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

@@ -49,6 +49,9 @@ class CompareViewModel : ViewModel() {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    private val _ignoreQuery = MutableStateFlow("")
+    val ignoreQuery: StateFlow<String> = _ignoreQuery.asStateFlow()
+
     private val _statusFilter = MutableStateFlow<FileStatus?>(null)
     val statusFilter: StateFlow<FileStatus?> = _statusFilter.asStateFlow()
 
@@ -67,6 +70,12 @@ class CompareViewModel : ViewModel() {
 
     private val _activeDiffViewMode = MutableStateFlow(DiffViewMode.UNIFIED)
     val activeDiffViewMode: StateFlow<DiffViewMode> = _activeDiffViewMode.asStateFlow()
+
+    private val _showLineNumbers = MutableStateFlow(true)
+    val showLineNumbers: StateFlow<Boolean> = _showLineNumbers.asStateFlow()
+
+    private val _lineWrapEnabled = MutableStateFlow(true)
+    val lineWrapEnabled: StateFlow<Boolean> = _lineWrapEnabled.asStateFlow()
 
     private val _activeFileSearchQuery = MutableStateFlow("")
     val activeFileSearchQuery: StateFlow<String> = _activeFileSearchQuery.asStateFlow()
@@ -341,6 +350,10 @@ class CompareViewModel : ViewModel() {
         _searchQuery.value = query
     }
 
+    fun updateIgnoreQuery(query: String) {
+        _ignoreQuery.value = query
+    }
+
     fun updateStatusFilter(filter: FileStatus?) {
         _statusFilter.value = filter
     }
@@ -359,6 +372,14 @@ class CompareViewModel : ViewModel() {
 
     fun setDiffViewMode(mode: DiffViewMode) {
         _activeDiffViewMode.value = mode
+    }
+
+    fun setShowLineNumbers(show: Boolean) {
+        _showLineNumbers.value = show
+    }
+
+    fun setLineWrapEnabled(enabled: Boolean) {
+        _lineWrapEnabled.value = enabled
     }
 
     fun updateActiveFileSearchQuery(query: String) {
