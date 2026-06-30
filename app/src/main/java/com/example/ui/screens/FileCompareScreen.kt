@@ -12,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -350,7 +352,24 @@ fun FileCompareScreen(
             }
 
             // Diff Viewing Pane
-            Box(modifier = Modifier.weight(1f)) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                if (event.changes.size > 1) {
+                                    val zoomFactor = event.calculateZoom()
+                                    if (zoomFactor != 1f) {
+                                        fontSize = (fontSize * zoomFactor).coerceIn(8f, 30f)
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                            }
+                        }
+                    }
+            ) {
                 if (isProcessing) {
                     Box(
                         modifier = Modifier.fillMaxSize(),

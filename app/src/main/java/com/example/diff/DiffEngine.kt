@@ -28,7 +28,8 @@ object MyersDiff {
     fun diff(
         original: List<String>,
         revised: List<String>,
-        options: DiffOptions
+        options: DiffOptions,
+        postProcess: Boolean = true
     ): List<DiffItem<String>> {
         // Preprocess lines if required
         val processedOriginal = original.map { preprocess(it, options) }
@@ -181,19 +182,41 @@ object MyersDiff {
                 val targetOrig = nextRaw.originalIndex
                 val targetRev = nextRaw.revisedIndex
 
-                // Insert blank lines in original up to targetOrig
-                if (targetOrig != null && origPtr < targetOrig) {
-                    while (origPtr < targetOrig) {
-                        finalResult.add(DiffItem(DiffType.DELETE, original[origPtr], originalIndex = origPtr))
-                        origPtr++
-                    }
+                val origBlanks = if (targetOrig != null && origPtr < targetOrig) (origPtr until targetOrig).toList() else emptyList()
+                val revBlanks = if (targetRev != null && revPtr < targetRev) (revPtr until targetRev).toList() else emptyList()
+
+                val commonSize = minOf(origBlanks.size, revBlanks.size)
+                for (idx in 0 until commonSize) {
+                    finalResult.add(
+                        DiffItem(
+                            type = DiffType.EQUAL,
+                            value = original[origBlanks[idx]],
+                            originalIndex = origBlanks[idx],
+                            revisedIndex = revBlanks[idx]
+                        )
+                    )
                 }
-                // Insert blank lines in revised up to targetRev
-                if (targetRev != null && revPtr < targetRev) {
-                    while (revPtr < targetRev) {
-                        finalResult.add(DiffItem(DiffType.INSERT, revised[revPtr], revisedIndex = revPtr))
-                        revPtr++
-                    }
+                val leftoverType = if (options.ignoreEmptyLines) DiffType.EQUAL else DiffType.DELETE
+                for (idx in commonSize until origBlanks.size) {
+                    finalResult.add(
+                        DiffItem(
+                            type = leftoverType,
+                            value = original[origBlanks[idx]],
+                            originalIndex = origBlanks[idx],
+                            revisedIndex = null
+                        )
+                    )
+                }
+                val leftoverTypeRev = if (options.ignoreEmptyLines) DiffType.EQUAL else DiffType.INSERT
+                for (idx in commonSize until revBlanks.size) {
+                    finalResult.add(
+                        DiffItem(
+                            type = leftoverTypeRev,
+                            value = revised[revBlanks[idx]],
+                            originalIndex = null,
+                            revisedIndex = revBlanks[idx]
+                        )
+                    )
                 }
 
                 // Append the raw diff item
@@ -203,19 +226,48 @@ object MyersDiff {
                 rawIdx++
             } else {
                 // Drain any leftovers
-                while (origPtr < original.size) {
-                    finalResult.add(DiffItem(DiffType.DELETE, original[origPtr], originalIndex = origPtr))
-                    origPtr++
+                val origBlanksLeft = (origPtr until original.size).toList()
+                val revBlanksLeft = (revPtr until revised.size).toList()
+                val commonLeftSize = minOf(origBlanksLeft.size, revBlanksLeft.size)
+                for (idx in 0 until commonLeftSize) {
+                    finalResult.add(
+                        DiffItem(
+                            type = DiffType.EQUAL,
+                            value = original[origBlanksLeft[idx]],
+                            originalIndex = origBlanksLeft[idx],
+                            revisedIndex = revBlanksLeft[idx]
+                        )
+                    )
                 }
-                while (revPtr < revised.size) {
-                    finalResult.add(DiffItem(DiffType.INSERT, revised[revPtr], revisedIndex = revPtr))
-                    revPtr++
+                val leftoverType = if (options.ignoreEmptyLines) DiffType.EQUAL else DiffType.DELETE
+                for (idx in commonLeftSize until origBlanksLeft.size) {
+                    finalResult.add(
+                        DiffItem(
+                            type = leftoverType,
+                            value = original[origBlanksLeft[idx]],
+                            originalIndex = origBlanksLeft[idx],
+                            revisedIndex = null
+                        )
+                    )
                 }
+                val leftoverTypeRev = if (options.ignoreEmptyLines) DiffType.EQUAL else DiffType.INSERT
+                for (idx in commonLeftSize until revBlanksLeft.size) {
+                    finalResult.add(
+                        DiffItem(
+                            type = leftoverTypeRev,
+                            value = revised[revBlanksLeft[idx]],
+                            originalIndex = null,
+                            revisedIndex = revBlanksLeft[idx]
+                        )
+                    )
+                }
+                origPtr = original.size
+                revPtr = revised.size
             }
         }
 
         // Post-process to merge matching Delete + Insert lines into MODIFIED status
-        return postProcessModifiedLines(finalResult)
+        return if (postProcess) postProcessModifiedLines(finalResult) else finalResult
     }
 
     private fun preprocess(line: String, options: DiffOptions): String {
@@ -310,39 +362,32 @@ object MyersDiff {
 
         if (origTokens.isEmpty() || revTokens.isEmpty()) return Pair(emptyList(), emptyList())
 
-        val dp = Array(origTokens.size + 1) { IntArray(revTokens.size + 1) }
-        for (i in 1..origTokens.size) {
-            for (j in 1..revTokens.size) {
-                if (origTokens[i - 1].text == revTokens[j - 1].text) {
-                    dp[i][j] = dp[i - 1][j - 1] + 1
-                } else {
-                    dp[i][j] = maxOf(dp[i - 1][j], dp[i][j - 1])
+        val diffResult = diff(
+            origTokens.map { it.text },
+            revTokens.map { it.text },
+            DiffOptions(matchCase = true, ignoreWhitespace = false, ignoreEmptyLines = false),
+            postProcess = false
+        )
+
+        val origHighlighted = BooleanArray(origTokens.size)
+        val revHighlighted = BooleanArray(revTokens.size)
+
+        for (item in diffResult) {
+            if (item.type != DiffType.EQUAL) {
+                if (item.originalIndex != null) {
+                    origHighlighted[item.originalIndex] = true
+                }
+                if (item.revisedIndex != null) {
+                    revHighlighted[item.revisedIndex] = true
                 }
             }
         }
 
-        // Backtrack to extract matching tokens
-        val matches = java.util.BitSet(origTokens.size)
-        val revMatches = java.util.BitSet(revTokens.size)
-        var i = origTokens.size
-        var j = revTokens.size
-        while (i > 0 && j > 0) {
-            if (origTokens[i - 1].text == revTokens[j - 1].text) {
-                matches.set(i - 1)
-                revMatches.set(j - 1)
-                i--
-                j--
-            } else if (dp[i - 1][j] >= dp[i][j - 1]) {
-                i--
-            } else {
-                j--
-            }
-        }
-
+        // Now, merge contiguous highlighted tokens into SubRanges
         val origHighlights = ArrayList<SubRange>()
         var start = -1
         for (idx in origTokens.indices) {
-            if (!matches.get(idx)) {
+            if (origHighlighted[idx]) {
                 if (start == -1) {
                     start = origTokens[idx].start
                 }
@@ -360,7 +405,7 @@ object MyersDiff {
         val revHighlights = ArrayList<SubRange>()
         var startRev = -1
         for (idx in revTokens.indices) {
-            if (!revMatches.get(idx)) {
+            if (revHighlighted[idx]) {
                 if (startRev == -1) {
                     startRev = revTokens[idx].start
                 }

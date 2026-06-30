@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.lazy.rememberLazyListState
 import com.example.ui.screens.CompareListScreen
 import com.example.ui.screens.FileCompareScreen
 import com.example.ui.theme.MyApplicationTheme
@@ -29,6 +30,7 @@ class MainActivity : ComponentActivity() {
     setContent {
       MyApplicationTheme {
         val selectedFile by compareViewModel.selectedFile.collectAsState()
+        val compareListState = rememberLazyListState()
 
         // Handle the system back gesture elegantly to exit the diff details view
         if (selectedFile != null) {
@@ -46,6 +48,7 @@ class MainActivity : ComponentActivity() {
           if (selectedFile == null) {
             CompareListScreen(
               viewModel = compareViewModel,
+              compareListState = compareListState,
               modifier = Modifier.fillMaxSize()
             )
           } else {
