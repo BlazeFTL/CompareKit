@@ -158,16 +158,6 @@ fun FileCompareScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        showExportDialog = true
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "Export Diff Results (This File)",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
                     Box {
                         IconButton(onClick = { showMenu = !showMenu }) {
                             Icon(imageVector = Icons.Default.MoreVert, contentDescription = "More options")

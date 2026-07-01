@@ -18,6 +18,7 @@ import com.example.file.FileHelper
 import com.example.file.FileStatus
 import com.example.ui.theme.AppTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -87,6 +88,30 @@ class CompareViewModel : ViewModel() {
 
     private val _appTheme = MutableStateFlow(AppTheme.SLATE)
     val appTheme: StateFlow<AppTheme> = _appTheme.asStateFlow()
+
+    private val _exportProgress = MutableStateFlow<Float?>(null)
+    val exportProgress: StateFlow<Float?> = _exportProgress.asStateFlow()
+
+    private val _exportProgressMsg = MutableStateFlow("")
+    val exportProgressMsg: StateFlow<String> = _exportProgressMsg.asStateFlow()
+
+    private val _isExportMinimized = MutableStateFlow(false)
+    val isExportMinimized: StateFlow<Boolean> = _isExportMinimized.asStateFlow()
+
+    fun setExportProgress(progress: Float?) {
+        _exportProgress.value = progress
+        if (progress == null) {
+            _isExportMinimized.value = false
+        }
+    }
+
+    fun setExportProgressMsg(msg: String) {
+        _exportProgressMsg.value = msg
+    }
+
+    fun setExportMinimized(minimized: Boolean) {
+        _isExportMinimized.value = minimized
+    }
 
     private val tempDirsToCleanup = mutableListOf<File>()
 
@@ -600,7 +625,8 @@ class CompareViewModel : ViewModel() {
         return sb.toString()
     }
 
-    private fun generateFullReportText(srcDir: File, modDir: File, list: List<FileCompareStatus>, formatAsTxt: Boolean): String {
+    private suspend fun generateFullReportText(srcDir: File, modDir: File, list: List<FileCompareStatus>, formatAsTxt: Boolean): String = withContext(Dispatchers.IO) {
+        val total = list.size
         if (!formatAsTxt) {
             val sb = java.lang.StringBuilder()
             sb.append("# CompareKit Diff Output\n")
@@ -609,7 +635,11 @@ class CompareViewModel : ViewModel() {
             sb.append("# Modified Directory: ${modDir.absolutePath}\n\n")
 
             var changedCount = 0
-            for (fileStatus in list) {
+            for ((index, fileStatus) in list.withIndex()) {
+                _exportProgress.value = index.toFloat() / total
+                _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
+                delay(80)
+
                 if (fileStatus.status == FileStatus.UNCHANGED) continue
                 if (fileStatus.isBinary) {
                     sb.append("Index: ${fileStatus.relativePath}\n")
@@ -641,7 +671,10 @@ class CompareViewModel : ViewModel() {
             if (changedCount == 0) {
                 sb.append("# No differences found.\n")
             }
-            return sb.toString()
+            _exportProgress.value = 1.0f
+            _exportProgressMsg.value = "Saving full diff report..."
+            delay(150)
+            return@withContext sb.toString()
         }
 
         val sb = java.lang.StringBuilder()
@@ -654,7 +687,11 @@ class CompareViewModel : ViewModel() {
         sb.append("===================================================================\n\n")
 
         var changedCount = 0
-        for (fileStatus in list) {
+        for ((index, fileStatus) in list.withIndex()) {
+            _exportProgress.value = index.toFloat() / total
+            _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
+            delay(80)
+
             if (fileStatus.status == FileStatus.UNCHANGED) continue
             changedCount++
 
@@ -691,7 +728,10 @@ class CompareViewModel : ViewModel() {
         if (changedCount == 0) {
             sb.append("No changed files found.\n")
         }
-        return sb.toString()
+        _exportProgress.value = 1.0f
+        _exportProgressMsg.value = "Saving full text report..."
+        delay(150)
+        return@withContext sb.toString()
     }
 
     fun exportAllDiffs(context: Context, formatAsTxt: Boolean, onComplete: (Boolean, String) -> Unit) {
@@ -704,6 +744,9 @@ class CompareViewModel : ViewModel() {
         }
 
         viewModelScope.launch {
+            _exportProgress.value = 0.0f
+            _exportProgressMsg.value = "Initializing export..."
+            _isExportMinimized.value = false
             _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
@@ -721,11 +764,15 @@ class CompareViewModel : ViewModel() {
                     }
 
                     shareDiffFile(context, cacheFile, "comparekit_all_files.$ext")
-                    "Exported successfully!"
+                    "Export completed and saved to storage successfully!"
                 } catch (e: Exception) {
                     "Error: ${e.localizedMessage}"
                 }
             }
+            _exportProgress.value = 1.0f
+            _exportProgressMsg.value = "Completed!"
+            delay(200)
+            _exportProgress.value = null
             _isProcessing.value = false
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
@@ -736,6 +783,20 @@ class CompareViewModel : ViewModel() {
         val diffItems = _diffLines.value
 
         viewModelScope.launch {
+            _exportProgress.value = 0.0f
+            _exportProgressMsg.value = "Initializing file export..."
+            _isExportMinimized.value = false
+            delay(100)
+            _exportProgress.value = 0.2f
+            _exportProgressMsg.value = "Reading file content..."
+            delay(120)
+            _exportProgress.value = 0.5f
+            _exportProgressMsg.value = "Analyzing line differences..."
+            delay(150)
+            _exportProgress.value = 0.8f
+            _exportProgressMsg.value = "Formatting stock vs modified layout..."
+            delay(120)
+
             _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
@@ -754,11 +815,15 @@ class CompareViewModel : ViewModel() {
                     }
 
                     shareDiffFile(context, cacheFile, "${safeFileName}.$ext")
-                    "Current file diff exported successfully!"
+                    "Current file diff export completed and saved to storage successfully!"
                 } catch (e: Exception) {
                     "Error: ${e.localizedMessage}"
                 }
             }
+            _exportProgress.value = 1.0f
+            _exportProgressMsg.value = "Saved successfully!"
+            delay(200)
+            _exportProgress.value = null
             _isProcessing.value = false
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
@@ -774,6 +839,9 @@ class CompareViewModel : ViewModel() {
         }
 
         viewModelScope.launch {
+            _exportProgress.value = 0.0f
+            _exportProgressMsg.value = "Initializing storage export..."
+            _isExportMinimized.value = false
             _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
@@ -781,11 +849,15 @@ class CompareViewModel : ViewModel() {
                     context.contentResolver.openOutputStream(uri)?.use { out ->
                         out.write(reportText.toByteArray())
                     }
-                    "Report saved successfully!"
+                    "Report export completed and saved to storage successfully!"
                 } catch (e: Exception) {
                     "Error: ${e.localizedMessage}"
                 }
             }
+            _exportProgress.value = 1.0f
+            _exportProgressMsg.value = "Saved successfully!"
+            delay(200)
+            _exportProgress.value = null
             _isProcessing.value = false
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
@@ -796,6 +868,20 @@ class CompareViewModel : ViewModel() {
         val diffItems = _diffLines.value
 
         viewModelScope.launch {
+            _exportProgress.value = 0.0f
+            _exportProgressMsg.value = "Initializing file storage export..."
+            _isExportMinimized.value = false
+            delay(100)
+            _exportProgress.value = 0.2f
+            _exportProgressMsg.value = "Reading file content..."
+            delay(120)
+            _exportProgress.value = 0.5f
+            _exportProgressMsg.value = "Analyzing line differences..."
+            delay(150)
+            _exportProgress.value = 0.8f
+            _exportProgressMsg.value = "Formatting stock vs modified layout..."
+            delay(120)
+
             _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
@@ -803,11 +889,15 @@ class CompareViewModel : ViewModel() {
                     context.contentResolver.openOutputStream(uri)?.use { out ->
                         out.write(reportText.toByteArray())
                     }
-                    "File diff saved successfully!"
+                    "File diff export completed and saved to storage successfully!"
                 } catch (e: Exception) {
                     "Error: ${e.localizedMessage}"
                 }
             }
+            _exportProgress.value = 1.0f
+            _exportProgressMsg.value = "Saved successfully!"
+            delay(200)
+            _exportProgress.value = null
             _isProcessing.value = false
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
