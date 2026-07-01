@@ -7,7 +7,11 @@ enum class AppTheme(val displayName: String) {
     MIDNIGHT("Midnight Indigo"),
     FOREST("Forest Green"),
     SUNSET("Sunset Amber"),
-    OCEAN("Ocean Cyan")
+    OCEAN("Ocean Cyan"),
+    ROSE_GOLD("Sakura Rose"),
+    NORDIC_FROST("Nordic Ice"),
+    COSMIC_NEBULA("Cosmic Purple"),
+    VINTAGE_SEPIA("Vintage Sepia")
 }
 
 // Fixed color schemas for light and dark modes
@@ -130,6 +134,102 @@ object ThemePalettes {
         onSecondary = Color(0xFF04121F),
         onBackground = Color(0xFFE0F2FE),
         onSurface = Color(0xFFE0F2FE)
+    )
+
+    // Rose Gold
+    val RoseGoldLight = Palette(
+        primary = Color(0xFFBE185D), // Pink 700
+        secondary = Color(0xFFB45309), // Amber 700
+        tertiary = Color(0xFFEC4899),
+        background = Color(0xFFFFF1F2), // Rose 50
+        surface = Color(0xFFFFFFFF),
+        onPrimary = Color.White,
+        onSecondary = Color.White,
+        onBackground = Color(0xFF4C0519),
+        onSurface = Color(0xFF4C0519)
+    )
+    val RoseGoldDark = Palette(
+        primary = Color(0xFFF472B6), // Pink 400
+        secondary = Color(0xFFFBBF24), // Amber 400
+        tertiary = Color(0xFFF43F5E),
+        background = Color(0xFF1C0A10),
+        surface = Color(0xFF2D121B),
+        onPrimary = Color(0xFF1C0A10),
+        onSecondary = Color(0xFF1C0A10),
+        onBackground = Color(0xFFFFE4E6),
+        onSurface = Color(0xFFFFE4E6)
+    )
+
+    // Nordic Frost
+    val NordicFrostLight = Palette(
+        primary = Color(0xFF0369A1), // Sky 700
+        secondary = Color(0xFF0F766E), // Teal 700
+        tertiary = Color(0xFF14B8A6),
+        background = Color(0xFFF0FDF4), // Mint 50
+        surface = Color(0xFFFFFFFF),
+        onPrimary = Color.White,
+        onSecondary = Color.White,
+        onBackground = Color(0xFF042F2E),
+        onSurface = Color(0xFF042F2E)
+    )
+    val NordicFrostDark = Palette(
+        primary = Color(0xFF38BDF8), // Sky 400
+        secondary = Color(0xFF34D399), // Mint 400
+        tertiary = Color(0xFF2DD4BF),
+        background = Color(0xFF0B131A),
+        surface = Color(0xFF14202C),
+        onPrimary = Color(0xFF0B131A),
+        onSecondary = Color(0xFF0B131A),
+        onBackground = Color(0xFFCCFBF1),
+        onSurface = Color(0xFFCCFBF1)
+    )
+
+    // Cosmic Nebula
+    val CosmicNebulaLight = Palette(
+        primary = Color(0xFF7E22CE), // Purple 700
+        secondary = Color(0xFFDB2777), // Pink 600
+        tertiary = Color(0xFFA855F7),
+        background = Color(0xFFFAF5FF), // Purple 50
+        surface = Color(0xFFFFFFFF),
+        onPrimary = Color.White,
+        onSecondary = Color.White,
+        onBackground = Color(0xFF2E1065),
+        onSurface = Color(0xFF2E1065)
+    )
+    val CosmicNebulaDark = Palette(
+        primary = Color(0xFFA855F7), // Purple 500
+        secondary = Color(0xFFEC4899), // Pink 500
+        tertiary = Color(0xFFF472B6),
+        background = Color(0xFF090514),
+        surface = Color(0xFF1A112D),
+        onPrimary = Color(0xFF090514),
+        onSecondary = Color(0xFF090514),
+        onBackground = Color(0xFFF3E8FF),
+        onSurface = Color(0xFFF3E8FF)
+    )
+
+    // Vintage Sepia
+    val VintageSepiaLight = Palette(
+        primary = Color(0xFF78350F), // Amber 900
+        secondary = Color(0xFF4D7C0F), // Lime 700
+        tertiary = Color(0xFFD97706),
+        background = Color(0xFFFEFBF3), // Vintage Sepia/Ivory
+        surface = Color(0xFFFFFFFF),
+        onPrimary = Color.White,
+        onSecondary = Color.White,
+        onBackground = Color(0xFF271300),
+        onSurface = Color(0xFF271300)
+    )
+    val VintageSepiaDark = Palette(
+        primary = Color(0xFFF59E0B), // Amber 500
+        secondary = Color(0xFFA3E635), // Lime 400
+        tertiary = Color(0xFFFBBF24),
+        background = Color(0xFF120C06),
+        surface = Color(0xFF22160C),
+        onPrimary = Color(0xFF120C06),
+        onSecondary = Color(0xFF120C06),
+        onBackground = Color(0xFFFEF3C7),
+        onSurface = Color(0xFFFEF3C7)
     )
 }
 

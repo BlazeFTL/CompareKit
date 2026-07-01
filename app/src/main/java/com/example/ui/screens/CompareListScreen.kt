@@ -227,6 +227,10 @@ fun CompareListScreen(
                                                     com.example.ui.theme.AppTheme.FOREST -> Color(0xFF059669)
                                                     com.example.ui.theme.AppTheme.SUNSET -> Color(0xFFEA580C)
                                                     com.example.ui.theme.AppTheme.OCEAN -> Color(0xFF0284C7)
+                                                    com.example.ui.theme.AppTheme.ROSE_GOLD -> Color(0xFFBE185D)
+                                                    com.example.ui.theme.AppTheme.NORDIC_FROST -> Color(0xFF0369A1)
+                                                    com.example.ui.theme.AppTheme.COSMIC_NEBULA -> Color(0xFF7E22CE)
+                                                    com.example.ui.theme.AppTheme.VINTAGE_SEPIA -> Color(0xFF78350F)
                                                 }
                                                 Box(
                                                     modifier = Modifier
@@ -251,6 +255,17 @@ fun CompareListScreen(
                         }
 
                         if (hasRunComparison) {
+                            IconButton(onClick = {
+                                viewModel.exportAllDiffs(context) { success, msg ->
+                                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Export Diff Results (All Files)",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                             IconButton(onClick = { isSearchActive = true }) {
                                 Icon(imageVector = Icons.Default.Search, contentDescription = "Search Files")
                             }

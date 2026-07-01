@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.diff.DiffItem
 import com.example.diff.DiffOptions
+import com.example.diff.DiffType
 import com.example.diff.MyersDiff
 import com.example.diff.Prettier
 import com.example.file.FileCompareStatus
@@ -88,6 +89,8 @@ class CompareViewModel : ViewModel() {
     val appTheme: StateFlow<AppTheme> = _appTheme.asStateFlow()
 
     private val tempDirsToCleanup = mutableListOf<File>()
+
+    private var sharedPrefs: android.content.SharedPreferences? = null
 
     // STORAGE ACCESS AND INBUILT EXPLORER STATES
     private val _hasStorageAccess = MutableStateFlow(false)
@@ -386,8 +389,19 @@ class CompareViewModel : ViewModel() {
         _lineWrapEnabled.value = enabled
     }
 
+    fun loadTheme(context: Context) {
+        sharedPrefs = context.getSharedPreferences("CompareKit_Prefs", Context.MODE_PRIVATE)
+        val savedThemeName = sharedPrefs?.getString("app_theme", AppTheme.SLATE.name) ?: AppTheme.SLATE.name
+        try {
+            _appTheme.value = AppTheme.valueOf(savedThemeName)
+        } catch (e: Exception) {
+            _appTheme.value = AppTheme.SLATE
+        }
+    }
+
     fun setAppTheme(theme: AppTheme) {
         _appTheme.value = theme
+        sharedPrefs?.edit()?.putString("app_theme", theme.name)?.apply()
     }
 
     fun updateActiveFileSearchQuery(query: String) {
@@ -493,6 +507,242 @@ class CompareViewModel : ViewModel() {
                 }
             }
             _isProcessing.value = false
+        }
+    }
+
+    fun exportAllDiffs(context: Context, onComplete: (Boolean, String) -> Unit) {
+        val srcDir = _sourceDir.value ?: return
+        val modDir = _modifiedDir.value ?: return
+        val list = _fileList.value
+        if (list.isEmpty()) {
+            onComplete(false, "No compared files found.")
+            return
+        }
+
+        viewModelScope.launch {
+            _isProcessing.value = true
+            val resultMessage = withContext(Dispatchers.IO) {
+                try {
+                    val sb = java.lang.StringBuilder()
+                    sb.append("# CompareKit Diff Output\n")
+                    sb.append("# Generated on: ${java.util.Date()}\n")
+                    sb.append("# Source Directory: ${srcDir.absolutePath}\n")
+                    sb.append("# Modified Directory: ${modDir.absolutePath}\n\n")
+
+                    var changedCount = 0
+
+                    for (fileStatus in list) {
+                        if (fileStatus.status == FileStatus.UNCHANGED) continue
+                        if (fileStatus.isBinary) {
+                            sb.append("Index: ${fileStatus.relativePath}\n")
+                            sb.append("Binary files ${srcDir.name}/${fileStatus.relativePath} and ${modDir.name}/${fileStatus.relativePath} differ\n\n")
+                            changedCount++
+                            continue
+                        }
+
+                        val srcFile = File(srcDir, fileStatus.relativePath)
+                        val modFile = File(modDir, fileStatus.relativePath)
+
+                        var srcLines = if (srcFile.exists()) srcFile.readLines() else emptyList()
+                        var modLines = if (modFile.exists()) modFile.readLines() else emptyList()
+
+                        if (_beautifierEnabled.value) {
+                            val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
+                            val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
+                            srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                            modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                        }
+
+                        val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                        val fileDiffString = formatUnifiedDiff(fileStatus.relativePath, diff)
+                        if (fileDiffString.isNotBlank()) {
+                            sb.append(fileDiffString).append("\n")
+                            changedCount++
+                        }
+                    }
+
+                    if (changedCount == 0) {
+                        sb.append("# No differences found.\n")
+                    }
+
+                    val cacheFile = File(context.cacheDir, "comparekit_all_files.diff")
+                    if (cacheFile.exists()) cacheFile.delete()
+                    cacheFile.writeText(sb.toString())
+
+                    // Save locally inside the modifiedDir's parent folder if writable
+                    val parentDir = modDir.parentFile
+                    if (parentDir != null && parentDir.exists() && parentDir.canWrite()) {
+                        val localFile = File(parentDir, "comparekit_results.diff")
+                        localFile.writeText(sb.toString())
+                    }
+
+                    shareDiffFile(context, cacheFile, "comparekit_all_files.diff")
+                    "Exported $changedCount modified files successfully!"
+                } catch (e: Exception) {
+                    "Error: ${e.localizedMessage}"
+                }
+            }
+            _isProcessing.value = false
+            onComplete(!resultMessage.startsWith("Error"), resultMessage)
+        }
+    }
+
+    fun exportCurrentFileDiff(context: Context, onComplete: (Boolean, String) -> Unit) {
+        val selected = _selectedFile.value ?: return
+        val diffItems = _diffLines.value
+
+        viewModelScope.launch {
+            _isProcessing.value = true
+            val resultMessage = withContext(Dispatchers.IO) {
+                try {
+                    val fileDiffString = formatUnifiedDiff(selected.relativePath, diffItems)
+                    
+                    val safeFileName = selected.relativePath.replace(File.separatorChar, '_').replace(' ', '_')
+                    val cacheFile = File(context.cacheDir, "diff_${safeFileName}.diff")
+                    if (cacheFile.exists()) cacheFile.delete()
+                    cacheFile.writeText(fileDiffString)
+
+                    // Save locally in modified directory parent if possible
+                    val modDir = _modifiedDir.value
+                    if (modDir != null && modDir.exists()) {
+                        val localFile = File(modDir, "${safeFileName}.diff")
+                        localFile.writeText(fileDiffString)
+                    }
+
+                    shareDiffFile(context, cacheFile, "${safeFileName}.diff")
+                    "Current file diff exported successfully!"
+                } catch (e: Exception) {
+                    "Error: ${e.localizedMessage}"
+                }
+            }
+            _isProcessing.value = false
+            onComplete(!resultMessage.startsWith("Error"), resultMessage)
+        }
+    }
+
+    private fun formatUnifiedDiff(relativePath: String, diffItems: List<DiffItem<String>>, contextLines: Int = 3): String {
+        if (diffItems.isEmpty()) return ""
+        
+        val sb = java.lang.StringBuilder()
+        sb.append("--- a/$relativePath\n")
+        sb.append("+++ b/$relativePath\n")
+
+        var i = 0
+        val n = diffItems.size
+        while (i < n) {
+            while (i < n && diffItems[i].type == DiffType.EQUAL) {
+                i++
+            }
+            if (i >= n) break
+
+            val hunkStart = (i - contextLines).coerceAtLeast(0)
+            
+            var hunkEnd = i
+            var lastChangeIndex = i
+            while (hunkEnd < n) {
+                val itemType = diffItems[hunkEnd].type
+                if (itemType != DiffType.EQUAL) {
+                    lastChangeIndex = hunkEnd
+                }
+                
+                if (hunkEnd - lastChangeIndex > contextLines) {
+                    var changeAhead = false
+                    val checkMax = (hunkEnd + contextLines * 2).coerceAtMost(n - 1)
+                    for (j in hunkEnd + 1 .. checkMax) {
+                        if (diffItems[j].type != DiffType.EQUAL) {
+                            changeAhead = true
+                            break
+                        }
+                    }
+                    if (!changeAhead) {
+                        break
+                    }
+                }
+                hunkEnd++
+            }
+            
+            val finalHunkEnd = (lastChangeIndex + contextLines + 1).coerceAtMost(n)
+            
+            var originalStart = -1
+            var originalCount = 0
+            var revisedStart = -1
+            var revisedCount = 0
+            
+            for (idx in hunkStart until finalHunkEnd) {
+                val item = diffItems[idx]
+                val isDelete = item.type == DiffType.DELETE || (item.type == DiffType.MODIFIED && item.originalIndex != null)
+                val isInsert = item.type == DiffType.INSERT || (item.type == DiffType.MODIFIED && item.revisedIndex != null)
+                val isEqual = item.type == DiffType.EQUAL
+                
+                if (isEqual) {
+                    if (item.originalIndex != null) {
+                        if (originalStart == -1) originalStart = item.originalIndex + 1
+                        originalCount++
+                    }
+                    if (item.revisedIndex != null) {
+                        if (revisedStart == -1) revisedStart = item.revisedIndex + 1
+                        revisedCount++
+                    }
+                } else {
+                    if (isDelete) {
+                        if (item.originalIndex != null) {
+                            if (originalStart == -1) originalStart = item.originalIndex + 1
+                            originalCount++
+                        }
+                    }
+                    if (isInsert) {
+                        if (item.revisedIndex != null) {
+                            if (revisedStart == -1) revisedStart = item.revisedIndex + 1
+                            revisedCount++
+                        }
+                    }
+                }
+            }
+            
+            if (originalStart == -1) originalStart = 1
+            if (revisedStart == -1) revisedStart = 1
+            
+            sb.append("@@ -$originalStart,$originalCount +$revisedStart,$revisedCount @@\n")
+            
+            for (idx in hunkStart until finalHunkEnd) {
+                val item = diffItems[idx]
+                val isDelete = item.type == DiffType.DELETE || (item.type == DiffType.MODIFIED && item.originalIndex != null)
+                val isInsert = item.type == DiffType.INSERT || (item.type == DiffType.MODIFIED && item.revisedIndex != null)
+                
+                if (isDelete) {
+                    sb.append("-").append(item.value).append("\n")
+                } else if (isInsert) {
+                    sb.append("+").append(item.value).append("\n")
+                } else {
+                    sb.append(" ").append(item.value).append("\n")
+                }
+            }
+            
+            i = finalHunkEnd
+        }
+        
+        return sb.toString()
+    }
+
+    private fun shareDiffFile(context: Context, file: File, displayName: String) {
+        try {
+            val authority = "${context.packageName}.fileprovider"
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, authority, file)
+            
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "CompareKit Diff Output - $displayName")
+                putExtra(Intent.EXTRA_TEXT, "Here is the unified diff patch of your file comparison.")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            
+            val chooserIntent = Intent.createChooser(intent, "Share Diff Results").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooserIntent)
+        } catch (e: Exception) {
+            _errorMessage.value = "Failed to share diff file: ${e.localizedMessage}"
         }
     }
 

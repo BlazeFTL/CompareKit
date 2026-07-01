@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.draw.clip
@@ -140,6 +141,19 @@ fun FileCompareScreen(
                     }
                 },
                 actions = {
+                    val context = LocalContext.current
+                    IconButton(onClick = {
+                        viewModel.exportCurrentFileDiff(context) { success, msg ->
+                            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Export Diff Results (This File)",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
                     Box {
                         IconButton(onClick = { showMenu = !showMenu }) {
                             Icon(imageVector = Icons.Default.MoreVert, contentDescription = "More options")
@@ -148,6 +162,20 @@ fun FileCompareScreen(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
+                            // Export Diff Results Item
+                            DropdownMenuItem(
+                                text = { Text("Export Diff Results") },
+                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                                onClick = {
+                                    viewModel.exportCurrentFileDiff(context) { success, msg ->
+                                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                    showMenu = false
+                                }
+                            )
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
                             // Search Action (Click opens the pop-out search bar!)
                             DropdownMenuItem(
                                 text = { Text(if (isSearchExpanded) "Hide Search" else "Search") },

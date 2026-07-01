@@ -28,6 +28,10 @@ fun AppTheme.getColorScheme(darkTheme: Boolean): ColorScheme {
         AppTheme.FOREST -> if (darkTheme) ThemePalettes.ForestDark else ThemePalettes.ForestLight
         AppTheme.SUNSET -> if (darkTheme) ThemePalettes.SunsetDark else ThemePalettes.SunsetLight
         AppTheme.OCEAN -> if (darkTheme) ThemePalettes.OceanDark else ThemePalettes.OceanLight
+        AppTheme.ROSE_GOLD -> if (darkTheme) ThemePalettes.RoseGoldDark else ThemePalettes.RoseGoldLight
+        AppTheme.NORDIC_FROST -> if (darkTheme) ThemePalettes.NordicFrostDark else ThemePalettes.NordicFrostLight
+        AppTheme.COSMIC_NEBULA -> if (darkTheme) ThemePalettes.CosmicNebulaDark else ThemePalettes.CosmicNebulaLight
+        AppTheme.VINTAGE_SEPIA -> if (darkTheme) ThemePalettes.VintageSepiaDark else ThemePalettes.VintageSepiaLight
     }
 
     return if (darkTheme) {
