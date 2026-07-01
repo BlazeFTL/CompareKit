@@ -213,7 +213,7 @@ fun ExportProgressOverlay(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(bottom = 72.dp),
-                contentAlignment = Alignment.BottomEnd
+                contentAlignment = Alignment.BottomStart
             ) {
                 Surface(
                     shape = RoundedCornerShape(24.dp),

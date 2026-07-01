@@ -702,9 +702,14 @@ fun FileCompareScreen(
             },
             confirmButton = {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    TextButton(onClick = { showExportDialog = false }) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
                     TextButton(
                         onClick = {
                             showExportDialog = false
@@ -717,7 +722,7 @@ fun FileCompareScreen(
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Save As...")
                     }
-                    
+                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             showExportDialog = false
@@ -730,11 +735,6 @@ fun FileCompareScreen(
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Share")
                     }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showExportDialog = false }) {
-                    Text("Cancel")
                 }
             }
         )
