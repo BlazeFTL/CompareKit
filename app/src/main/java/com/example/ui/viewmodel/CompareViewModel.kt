@@ -747,7 +747,6 @@ class CompareViewModel : ViewModel() {
             _exportProgress.value = 0.0f
             _exportProgressMsg.value = "Initializing export..."
             _isExportMinimized.value = false
-            _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
                     val reportText = generateFullReportText(srcDir, modDir, list, formatAsTxt)
@@ -773,7 +772,6 @@ class CompareViewModel : ViewModel() {
             _exportProgressMsg.value = "Completed!"
             delay(200)
             _exportProgress.value = null
-            _isProcessing.value = false
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
     }
@@ -797,7 +795,6 @@ class CompareViewModel : ViewModel() {
             _exportProgressMsg.value = "Formatting stock vs modified layout..."
             delay(120)
 
-            _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
                     val reportText = generateSingleFileReportText(selected.relativePath, diffItems, formatAsTxt)
@@ -824,7 +821,6 @@ class CompareViewModel : ViewModel() {
             _exportProgressMsg.value = "Saved successfully!"
             delay(200)
             _exportProgress.value = null
-            _isProcessing.value = false
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
     }
@@ -842,7 +838,6 @@ class CompareViewModel : ViewModel() {
             _exportProgress.value = 0.0f
             _exportProgressMsg.value = "Initializing storage export..."
             _isExportMinimized.value = false
-            _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
                     val reportText = generateFullReportText(srcDir, modDir, list, formatAsTxt)
@@ -858,7 +853,6 @@ class CompareViewModel : ViewModel() {
             _exportProgressMsg.value = "Saved successfully!"
             delay(200)
             _exportProgress.value = null
-            _isProcessing.value = false
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
     }
@@ -882,7 +876,6 @@ class CompareViewModel : ViewModel() {
             _exportProgressMsg.value = "Formatting stock vs modified layout..."
             delay(120)
 
-            _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
                     val reportText = generateSingleFileReportText(selected.relativePath, diffItems, formatAsTxt)
@@ -898,7 +891,6 @@ class CompareViewModel : ViewModel() {
             _exportProgressMsg.value = "Saved successfully!"
             delay(200)
             _exportProgress.value = null
-            _isProcessing.value = false
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
     }
