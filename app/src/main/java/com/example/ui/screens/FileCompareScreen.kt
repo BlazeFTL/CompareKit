@@ -624,6 +624,7 @@ fun FileCompareScreen(
     if (showExportDialog) {
         AlertDialog(
             onDismissRequest = { showExportDialog = false },
+            modifier = Modifier.fillMaxWidth(0.95f),
             title = { Text("Export File Difference") },
             text = {
                 Column {

@@ -962,6 +962,7 @@ fun CompareListScreen(
     if (showExportDialog) {
         AlertDialog(
             onDismissRequest = { showExportDialog = false },
+            modifier = Modifier.fillMaxWidth(0.95f),
             title = { Text("Export All Differences") },
             text = {
                 Column {

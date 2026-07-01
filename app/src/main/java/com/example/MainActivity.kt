@@ -119,7 +119,8 @@ fun ExportProgressOverlay(
         AnimatedVisibility(
             visible = !minimized,
             enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it }
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             Card(
                 modifier = Modifier
@@ -195,10 +196,10 @@ fun ExportProgressOverlay(
 
                     Text(
                         text = "$percentage% completed",
+                        modifier = Modifier.align(Alignment.End),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.align(Alignment.End)
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
@@ -207,47 +208,43 @@ fun ExportProgressOverlay(
         AnimatedVisibility(
             visible = minimized,
             enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it }
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(bottom = 72.dp)
         ) {
-            Box(
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                tonalElevation = 6.dp,
+                shadowElevation = 6.dp,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 72.dp),
-                contentAlignment = Alignment.BottomStart
+                    .padding(8.dp)
+                    .clickable { onMinimizeChange(false) }
             ) {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    tonalElevation = 6.dp,
-                    shadowElevation = 6.dp,
-                    modifier = Modifier
-                        .padding(8.dp)
-                        .clickable { onMinimizeChange(false) }
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.5.dp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Text(
-                            text = "Exporting: $percentage%",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowUp,
-                            contentDescription = "Restore",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
+                    CircularProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.5.dp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "Exporting: $percentage%",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Restore",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
                 }
             }
         }
