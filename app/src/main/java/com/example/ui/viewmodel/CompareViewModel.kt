@@ -510,7 +510,191 @@ class CompareViewModel : ViewModel() {
         }
     }
 
-    fun exportAllDiffs(context: Context, onComplete: (Boolean, String) -> Unit) {
+    private fun generateSingleFileReportText(relativePath: String, diffItems: List<DiffItem<String>>, formatAsTxt: Boolean): String {
+        if (!formatAsTxt) {
+            return formatUnifiedDiff(relativePath, diffItems)
+        }
+        
+        val sb = java.lang.StringBuilder()
+        sb.append("===================================================================\n")
+        sb.append("COMPAREKIT DIFF REPORT: $relativePath\n")
+        sb.append("===================================================================\n")
+        sb.append("Generated on: ${java.util.Date()}\n\n")
+        sb.append("LEGEND:\n")
+        sb.append("  [STOCK]  : Line as it exists in the Original (Stock) file\n")
+        sb.append("  [MODIFIED]: Line as it exists in the Revised (Modified) file\n")
+        sb.append("  [-]       : Deleted line (present in Stock, removed in Modified)\n")
+        sb.append("  [+]       : Inserted line (not in Stock, added in Modified)\n")
+        sb.append("===================================================================\n\n")
+
+        var i = 0
+        val n = diffItems.size
+        val contextLines = 3
+        while (i < n) {
+            while (i < n && diffItems[i].type == DiffType.EQUAL) {
+                i++
+            }
+            if (i >= n) break
+
+            val hunkStart = (i - contextLines).coerceAtLeast(0)
+            
+            var hunkEnd = i
+            var lastChangeIndex = i
+            while (hunkEnd < n) {
+                val itemType = diffItems[hunkEnd].type
+                if (itemType != DiffType.EQUAL) {
+                    lastChangeIndex = hunkEnd
+                }
+                
+                if (hunkEnd - lastChangeIndex > contextLines) {
+                    var changeAhead = false
+                    val checkMax = (hunkEnd + contextLines * 2).coerceAtMost(n - 1)
+                    for (j in hunkEnd + 1 .. checkMax) {
+                        if (diffItems[j].type != DiffType.EQUAL) {
+                            changeAhead = true
+                            break
+                        }
+                    }
+                    if (!changeAhead) {
+                        break
+                    }
+                }
+                hunkEnd++
+            }
+            
+            val finalHunkEnd = (lastChangeIndex + contextLines + 1).coerceAtMost(n)
+            
+            var originalStart = -1
+            var revisedStart = -1
+            for (idx in hunkStart until finalHunkEnd) {
+                val item = diffItems[idx]
+                if (item.originalIndex != null && originalStart == -1) originalStart = item.originalIndex + 1
+                if (item.revisedIndex != null && revisedStart == -1) revisedStart = item.revisedIndex + 1
+            }
+            if (originalStart == -1) originalStart = 1
+            if (revisedStart == -1) revisedStart = 1
+
+            sb.append("--- Block starting around Stock Line $originalStart, Modified Line $revisedStart ---\n")
+            
+            for (idx in hunkStart until finalHunkEnd) {
+                val item = diffItems[idx]
+                val type = item.type
+                val isDelete = type == DiffType.DELETE || (type == DiffType.MODIFIED && item.originalIndex != null)
+                val isInsert = type == DiffType.INSERT || (type == DiffType.MODIFIED && item.revisedIndex != null)
+                
+                val origLineNum = item.originalIndex?.plus(1)?.toString() ?: ""
+                val revLineNum = item.revisedIndex?.plus(1)?.toString() ?: ""
+                
+                if (isDelete) {
+                    sb.append(java.lang.String.format("  STOCK Line %-5s [-] : %s\n", origLineNum, item.value))
+                } else if (isInsert) {
+                    sb.append(java.lang.String.format("  MODIF Line %-5s [+] : %s\n", revLineNum, item.value))
+                } else {
+                    sb.append(java.lang.String.format("        Line %-5s     : %s\n", origLineNum, item.value))
+                }
+            }
+            sb.append("\n")
+            i = finalHunkEnd
+        }
+        
+        return sb.toString()
+    }
+
+    private fun generateFullReportText(srcDir: File, modDir: File, list: List<FileCompareStatus>, formatAsTxt: Boolean): String {
+        if (!formatAsTxt) {
+            val sb = java.lang.StringBuilder()
+            sb.append("# CompareKit Diff Output\n")
+            sb.append("# Generated on: ${java.util.Date()}\n")
+            sb.append("# Source Directory: ${srcDir.absolutePath}\n")
+            sb.append("# Modified Directory: ${modDir.absolutePath}\n\n")
+
+            var changedCount = 0
+            for (fileStatus in list) {
+                if (fileStatus.status == FileStatus.UNCHANGED) continue
+                if (fileStatus.isBinary) {
+                    sb.append("Index: ${fileStatus.relativePath}\n")
+                    sb.append("Binary files ${srcDir.name}/${fileStatus.relativePath} and ${modDir.name}/${fileStatus.relativePath} differ\n\n")
+                    changedCount++
+                    continue
+                }
+
+                val srcFile = File(srcDir, fileStatus.relativePath)
+                val modFile = File(modDir, fileStatus.relativePath)
+
+                var srcLines = if (srcFile.exists()) srcFile.readLines() else emptyList()
+                var modLines = if (modFile.exists()) modFile.readLines() else emptyList()
+
+                if (_beautifierEnabled.value) {
+                    val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
+                    val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
+                    srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                    modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                }
+
+                val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                val fileDiffString = formatUnifiedDiff(fileStatus.relativePath, diff)
+                if (fileDiffString.isNotBlank()) {
+                    sb.append(fileDiffString).append("\n")
+                    changedCount++
+                }
+            }
+            if (changedCount == 0) {
+                sb.append("# No differences found.\n")
+            }
+            return sb.toString()
+        }
+
+        val sb = java.lang.StringBuilder()
+        sb.append("===================================================================\n")
+        sb.append("COMPAREKIT ALL FILES DIFF REPORT\n")
+        sb.append("===================================================================\n")
+        sb.append("Generated on: ${java.util.Date()}\n")
+        sb.append("Source (Stock) Directory: ${srcDir.absolutePath}\n")
+        sb.append("Modified Directory: ${modDir.absolutePath}\n")
+        sb.append("===================================================================\n\n")
+
+        var changedCount = 0
+        for (fileStatus in list) {
+            if (fileStatus.status == FileStatus.UNCHANGED) continue
+            changedCount++
+
+            sb.append("FILE: ${fileStatus.relativePath}\n")
+            sb.append("STATUS: ${fileStatus.status}\n")
+            if (fileStatus.isBinary) {
+                sb.append("Binary files differ.\n\n")
+                continue
+            }
+
+            val srcFile = File(srcDir, fileStatus.relativePath)
+            val modFile = File(modDir, fileStatus.relativePath)
+
+            var srcLines = if (srcFile.exists()) srcFile.readLines() else emptyList()
+            var modLines = if (modFile.exists()) modFile.readLines() else emptyList()
+
+            if (_beautifierEnabled.value) {
+                val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
+                val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
+                srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+            }
+
+            val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+            val fileDiffString = generateSingleFileReportText(fileStatus.relativePath, diff, formatAsTxt = true)
+            if (fileDiffString.isNotBlank()) {
+                sb.append(fileDiffString).append("\n")
+            } else {
+                sb.append("(No textual differences found)\n\n")
+            }
+            sb.append("===================================================================\n\n")
+        }
+
+        if (changedCount == 0) {
+            sb.append("No changed files found.\n")
+        }
+        return sb.toString()
+    }
+
+    fun exportAllDiffs(context: Context, formatAsTxt: Boolean, onComplete: (Boolean, String) -> Unit) {
         val srcDir = _sourceDir.value ?: return
         val modDir = _modifiedDir.value ?: return
         val list = _fileList.value
@@ -523,61 +707,21 @@ class CompareViewModel : ViewModel() {
             _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
-                    val sb = java.lang.StringBuilder()
-                    sb.append("# CompareKit Diff Output\n")
-                    sb.append("# Generated on: ${java.util.Date()}\n")
-                    sb.append("# Source Directory: ${srcDir.absolutePath}\n")
-                    sb.append("# Modified Directory: ${modDir.absolutePath}\n\n")
-
-                    var changedCount = 0
-
-                    for (fileStatus in list) {
-                        if (fileStatus.status == FileStatus.UNCHANGED) continue
-                        if (fileStatus.isBinary) {
-                            sb.append("Index: ${fileStatus.relativePath}\n")
-                            sb.append("Binary files ${srcDir.name}/${fileStatus.relativePath} and ${modDir.name}/${fileStatus.relativePath} differ\n\n")
-                            changedCount++
-                            continue
-                        }
-
-                        val srcFile = File(srcDir, fileStatus.relativePath)
-                        val modFile = File(modDir, fileStatus.relativePath)
-
-                        var srcLines = if (srcFile.exists()) srcFile.readLines() else emptyList()
-                        var modLines = if (modFile.exists()) modFile.readLines() else emptyList()
-
-                        if (_beautifierEnabled.value) {
-                            val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
-                            val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
-                            srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
-                            modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
-                        }
-
-                        val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
-                        val fileDiffString = formatUnifiedDiff(fileStatus.relativePath, diff)
-                        if (fileDiffString.isNotBlank()) {
-                            sb.append(fileDiffString).append("\n")
-                            changedCount++
-                        }
-                    }
-
-                    if (changedCount == 0) {
-                        sb.append("# No differences found.\n")
-                    }
-
-                    val cacheFile = File(context.cacheDir, "comparekit_all_files.diff")
+                    val reportText = generateFullReportText(srcDir, modDir, list, formatAsTxt)
+                    val ext = if (formatAsTxt) "txt" else "diff"
+                    val cacheFile = File(context.cacheDir, "comparekit_all_files.$ext")
                     if (cacheFile.exists()) cacheFile.delete()
-                    cacheFile.writeText(sb.toString())
+                    cacheFile.writeText(reportText)
 
                     // Save locally inside the modifiedDir's parent folder if writable
                     val parentDir = modDir.parentFile
                     if (parentDir != null && parentDir.exists() && parentDir.canWrite()) {
-                        val localFile = File(parentDir, "comparekit_results.diff")
-                        localFile.writeText(sb.toString())
+                        val localFile = File(parentDir, "comparekit_results.$ext")
+                        localFile.writeText(reportText)
                     }
 
-                    shareDiffFile(context, cacheFile, "comparekit_all_files.diff")
-                    "Exported $changedCount modified files successfully!"
+                    shareDiffFile(context, cacheFile, "comparekit_all_files.$ext")
+                    "Exported successfully!"
                 } catch (e: Exception) {
                     "Error: ${e.localizedMessage}"
                 }
@@ -587,7 +731,7 @@ class CompareViewModel : ViewModel() {
         }
     }
 
-    fun exportCurrentFileDiff(context: Context, onComplete: (Boolean, String) -> Unit) {
+    fun exportCurrentFileDiff(context: Context, formatAsTxt: Boolean, onComplete: (Boolean, String) -> Unit) {
         val selected = _selectedFile.value ?: return
         val diffItems = _diffLines.value
 
@@ -595,22 +739,71 @@ class CompareViewModel : ViewModel() {
             _isProcessing.value = true
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
-                    val fileDiffString = formatUnifiedDiff(selected.relativePath, diffItems)
-                    
+                    val reportText = generateSingleFileReportText(selected.relativePath, diffItems, formatAsTxt)
+                    val ext = if (formatAsTxt) "txt" else "diff"
                     val safeFileName = selected.relativePath.replace(File.separatorChar, '_').replace(' ', '_')
-                    val cacheFile = File(context.cacheDir, "diff_${safeFileName}.diff")
+                    val cacheFile = File(context.cacheDir, "diff_${safeFileName}.$ext")
                     if (cacheFile.exists()) cacheFile.delete()
-                    cacheFile.writeText(fileDiffString)
+                    cacheFile.writeText(reportText)
 
                     // Save locally in modified directory parent if possible
                     val modDir = _modifiedDir.value
                     if (modDir != null && modDir.exists()) {
-                        val localFile = File(modDir, "${safeFileName}.diff")
-                        localFile.writeText(fileDiffString)
+                        val localFile = File(modDir, "${safeFileName}.$ext")
+                        localFile.writeText(reportText)
                     }
 
-                    shareDiffFile(context, cacheFile, "${safeFileName}.diff")
+                    shareDiffFile(context, cacheFile, "${safeFileName}.$ext")
                     "Current file diff exported successfully!"
+                } catch (e: Exception) {
+                    "Error: ${e.localizedMessage}"
+                }
+            }
+            _isProcessing.value = false
+            onComplete(!resultMessage.startsWith("Error"), resultMessage)
+        }
+    }
+
+    fun exportAllDiffsToUri(context: Context, uri: Uri, formatAsTxt: Boolean, onComplete: (Boolean, String) -> Unit) {
+        val srcDir = _sourceDir.value ?: return
+        val modDir = _modifiedDir.value ?: return
+        val list = _fileList.value
+        if (list.isEmpty()) {
+            onComplete(false, "No compared files found.")
+            return
+        }
+
+        viewModelScope.launch {
+            _isProcessing.value = true
+            val resultMessage = withContext(Dispatchers.IO) {
+                try {
+                    val reportText = generateFullReportText(srcDir, modDir, list, formatAsTxt)
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(reportText.toByteArray())
+                    }
+                    "Report saved successfully!"
+                } catch (e: Exception) {
+                    "Error: ${e.localizedMessage}"
+                }
+            }
+            _isProcessing.value = false
+            onComplete(!resultMessage.startsWith("Error"), resultMessage)
+        }
+    }
+
+    fun exportCurrentFileDiffToUri(context: Context, uri: Uri, formatAsTxt: Boolean, onComplete: (Boolean, String) -> Unit) {
+        val selected = _selectedFile.value ?: return
+        val diffItems = _diffLines.value
+
+        viewModelScope.launch {
+            _isProcessing.value = true
+            val resultMessage = withContext(Dispatchers.IO) {
+                try {
+                    val reportText = generateSingleFileReportText(selected.relativePath, diffItems, formatAsTxt)
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(reportText.toByteArray())
+                    }
+                    "File diff saved successfully!"
                 } catch (e: Exception) {
                     "Error: ${e.localizedMessage}"
                 }

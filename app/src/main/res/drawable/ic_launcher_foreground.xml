@@ -1,47 +1,8 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-
-    <!-- Back File Sheet (Original - Slate Accent) -->
-    <path
-        android:fillColor="#475569"
-        android:pathData="M32,24h24l12,12v36H32V24z" />
-    
-    <!-- Back File Folded Corner shadow & flap -->
-    <path
-        android:fillColor="#1E293B"
-        android:pathData="M56,24v12h12L56,24z" />
-
-    <!-- Front File Sheet (Revised - Vibrant Indigo) -->
-    <path
-        android:fillColor="#4F46E5"
-        android:pathData="M44,36h24l12,12v36H44V36z" />
-    
-    <!-- Front File Folded Corner shadow & flap -->
-    <path
-        android:fillColor="#312E81"
-        android:pathData="M68,36v12h12L68,36z" />
-
-    <!-- Stylized Diff Indicator lines on Front File -->
-    <!-- Green Insertion Line (Active/Added) -->
-    <path
-        android:fillColor="#10B981"
-        android:pathData="M50,54h20v4H50v-4z" />
-
-    <!-- Red Deletion Line (Active/Removed) -->
-    <path
-        android:fillColor="#EF4444"
-        android:pathData="M50,62h14v4H50v-4z" />
-
-    <!-- Orange Modified Line (Changed) -->
-    <path
-        android:fillColor="#F59E0B"
-        android:pathData="M50,70h18v4H50v-4z" />
-
-    <!-- Accent Dot for modern finish -->
-    <path
-        android:fillColor="#38BDF8"
-        android:pathData="M44,84h36v2H44v-2z" />
-</vector>
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="66dp"
+        android:height="66dp"
+        android:drawable="@drawable/ic_compare_logo_1782893178638"
+        android:gravity="center" />
+</layer-list>

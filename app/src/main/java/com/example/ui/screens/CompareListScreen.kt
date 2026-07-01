@@ -79,6 +79,19 @@ fun CompareListScreen(
     var isSearchActive by remember { mutableStateOf(false) }
     var showIgnoreField by remember { mutableStateOf(false) }
 
+    var showExportDialog by remember { mutableStateOf(false) }
+    var exportFormatAsTxt by remember { mutableStateOf(false) } // false = .diff, true = .txt
+
+    val saveAllDiffsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportAllDiffsToUri(context, uri, formatAsTxt = exportFormatAsTxt) { success, msg ->
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Go back when in picker view if back is pressed
     if (activePickerTarget != PickerTarget.NONE) {
         val storageRoot = viewModel.storageRoot
@@ -255,11 +268,7 @@ fun CompareListScreen(
                         }
 
                         if (hasRunComparison) {
-                            IconButton(onClick = {
-                                viewModel.exportAllDiffs(context) { success, msg ->
-                                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }) {
+                            IconButton(onClick = { showExportDialog = true }) {
                                 Icon(
                                     imageVector = Icons.Default.Share,
                                     contentDescription = "Export Diff Results (All Files)",
@@ -946,6 +955,124 @@ fun CompareListScreen(
                 viewModel.updateDiffOptions(opts)
                 viewModel.setBeautifierEnabled(pretty)
                 showSettingsDialog = false
+            }
+        )
+    }
+
+    if (showExportDialog) {
+        AlertDialog(
+            onDismissRequest = { showExportDialog = false },
+            title = { Text("Export All Differences") },
+            text = {
+                Column {
+                    Text(
+                        text = "Choose the format of the generated report:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    
+                    // Standard Unified Diff option
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { exportFormatAsTxt = false }
+                            .padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (!exportFormatAsTxt) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            RadioButton(
+                                selected = !exportFormatAsTxt,
+                                onClick = { exportFormatAsTxt = false }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Standard Unified Diff (.diff)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = "Standard patches compatible with code editors, git, and IDEs.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    // Human Readable option
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { exportFormatAsTxt = true }
+                            .padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (exportFormatAsTxt) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            RadioButton(
+                                selected = exportFormatAsTxt,
+                                onClick = { exportFormatAsTxt = true }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Stock vs Modified Text Report (.txt)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = "Highly readable. Displays 'STOCK File' vs 'MODIFIED File' lines with numbers side-by-side.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = {
+                            showExportDialog = false
+                            val ext = if (exportFormatAsTxt) "txt" else "diff"
+                            saveAllDiffsLauncher.launch("comparekit_report.$ext")
+                        }
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Save As...")
+                    }
+                    
+                    Button(
+                        onClick = {
+                            showExportDialog = false
+                            viewModel.exportAllDiffs(context, formatAsTxt = exportFormatAsTxt) { success, msg ->
+                                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Share")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExportDialog = false }) {
+                    Text("Cancel")
+                }
             }
         )
     }

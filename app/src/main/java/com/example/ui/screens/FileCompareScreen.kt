@@ -1,7 +1,10 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,6 +61,20 @@ fun FileCompareScreen(
     var showMenu by remember { mutableStateOf(false) } // Control Three-Dot Menu
     var fontSize by remember { mutableStateOf(13f) } // Dynamic zoom size
     var showSettingsDialog by remember { mutableStateOf(false) }
+
+    var showExportDialog by remember { mutableStateOf(false) }
+    var exportFormatAsTxt by remember { mutableStateOf(false) } // false = .diff, true = .txt
+
+    val context = LocalContext.current
+    val saveCurrentDiffLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportCurrentFileDiffToUri(context, uri, formatAsTxt = exportFormatAsTxt) { success, msg ->
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     // Group contiguous non-equal lines into cohesive change blocks (for Up/Down traversal)
     val changeBlocks = remember(diffLines) {
@@ -141,11 +158,8 @@ fun FileCompareScreen(
                     }
                 },
                 actions = {
-                    val context = LocalContext.current
                     IconButton(onClick = {
-                        viewModel.exportCurrentFileDiff(context) { success, msg ->
-                            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                        }
+                        showExportDialog = true
                     }) {
                         Icon(
                             imageVector = Icons.Default.Share,
@@ -167,9 +181,7 @@ fun FileCompareScreen(
                                 text = { Text("Export Diff Results") },
                                 leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
                                 onClick = {
-                                    viewModel.exportCurrentFileDiff(context) { success, msg ->
-                                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                                    }
+                                    showExportDialog = true
                                     showMenu = false
                                 }
                             )
@@ -615,6 +627,125 @@ fun FileCompareScreen(
                 viewModel.updateDiffOptions(opts)
                 viewModel.setBeautifierEnabled(pretty)
                 showSettingsDialog = false
+            }
+        )
+    }
+
+    if (showExportDialog) {
+        AlertDialog(
+            onDismissRequest = { showExportDialog = false },
+            title = { Text("Export File Difference") },
+            text = {
+                Column {
+                    Text(
+                        text = "Choose the format of the generated report:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    
+                    // Standard Unified Diff option
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { exportFormatAsTxt = false }
+                            .padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (!exportFormatAsTxt) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            RadioButton(
+                                selected = !exportFormatAsTxt,
+                                onClick = { exportFormatAsTxt = false }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Standard Unified Diff (.diff)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = "Standard patch format compatible with development tools and other text editors.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    // Human Readable option
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { exportFormatAsTxt = true }
+                            .padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (exportFormatAsTxt) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            RadioButton(
+                                selected = exportFormatAsTxt,
+                                onClick = { exportFormatAsTxt = true }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Stock vs Modified Text Report (.txt)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = "Easily readable format showing Stock file lines vs Modified changes with numbers.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = {
+                            showExportDialog = false
+                            val ext = if (exportFormatAsTxt) "txt" else "diff"
+                            val safeFileName = fileItem.relativePath.replace('/', '_').replace(' ', '_')
+                            saveCurrentDiffLauncher.launch("diff_${safeFileName}.$ext")
+                        }
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Save As...")
+                    }
+                    
+                    Button(
+                        onClick = {
+                            showExportDialog = false
+                            viewModel.exportCurrentFileDiff(context, formatAsTxt = exportFormatAsTxt) { success, msg ->
+                                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Share")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExportDialog = false }) {
+                    Text("Cancel")
+                }
             }
         )
     }
