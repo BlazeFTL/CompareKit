@@ -711,7 +711,7 @@ fun FileCompareScreen(
                             Text("Cancel")
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        TextButton(
+                        Button(
                             onClick = {
                                 showExportDialog = false
                                 val ext = if (exportFormatAsTxt) "txt" else "diff"
@@ -722,19 +722,6 @@ fun FileCompareScreen(
                             Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Save As...")
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                showExportDialog = false
-                                viewModel.exportCurrentFileDiff(context, formatAsTxt = exportFormatAsTxt) { success, msg ->
-                                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Share")
                         }
                     }
                 }
