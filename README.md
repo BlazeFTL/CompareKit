@@ -18,6 +18,8 @@ A Material UI file/folder/zip comparison app for Android.
   - Stock vs Modified text report (`.txt`) — readable side-by-side line report
 - 9 built-in color themes: Compare Slate, Midnight Indigo, Forest Green, Sunset Amber, Ocean Cyan, Sakura Rose, Nordic Ice, Cosmic Purple, Vintage Sepia
 
+**Currently Apk Comparing Isnt Available You Have To Decompile Source And Mod Manually...But I Will Try To Add This**
+
 ## Screenshots
 <img width="702" height="1560" alt="Screenshot_20260702-132651_Spark Launcher" src="https://github.com/user-attachments/assets/4cbce875-bd61-4391-8ad8-48e7a904f568" />
 <img width="702" height="1560" alt="Screenshot_20260702-132654_Spark Launcher" src="https://github.com/user-attachments/assets/ab2963c9-1e35-4f75-9233-c8b35b9fc763" />
