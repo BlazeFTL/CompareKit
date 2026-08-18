@@ -201,19 +201,14 @@ class CompareViewModel : ViewModel() {
             _compareProgress.value = 0f
             withContext(Dispatchers.IO) {
                 try {
-                    if (_activeDexVirtualPath.value == null) {
-                        parentComparisonFileList = _fileList.value
-                    }
-                    _activeDexVirtualPath.value = dexRelativePath.ifEmpty { "classes.dex" }
-
                     val cleanPath = dexRelativePath.removePrefix("/").replace('\\', '/')
                     val srcBytes = if (cleanPath.isNotEmpty()) {
-                        getFileBytes(isSource = true, cleanPath) ?: ByteArray(0)
+                        getRawFileBytes(isSource = true, cleanPath) ?: ByteArray(0)
                     } else {
                         _sourceFile.value?.readBytes() ?: ByteArray(0)
                     }
                     val modBytes = if (cleanPath.isNotEmpty()) {
-                        getFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
+                        getRawFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
                     } else {
                         _modifiedFile.value?.readBytes() ?: ByteArray(0)
                     }
@@ -230,6 +225,11 @@ class CompareViewModel : ViewModel() {
                         virtualDexModifiedClasses.clear()
                         virtualDexModifiedClasses.putAll(modClasses)
                     }
+
+                    if (_activeDexVirtualPath.value == null) {
+                        parentComparisonFileList = _fileList.value
+                    }
+                    _activeDexVirtualPath.value = dexRelativePath.ifEmpty { "classes.dex" }
 
                     val allClassNames = (srcClasses.keys + modClasses.keys).sorted()
                     val virtualSmaliList = allClassNames.map { className ->
@@ -287,7 +287,7 @@ class CompareViewModel : ViewModel() {
         synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses.clear() }
     }
 
-    fun updateDexCompareOptions(options: DexCompareOptions) {
+    fun saveDexCompareOptions(options: DexCompareOptions) {
         _dexCompareOptions.value = options
         sharedPrefs?.edit()?.apply {
             putBoolean("dex_ignore_debug_info", options.ignoreDebugInfo)
@@ -297,10 +297,14 @@ class CompareViewModel : ViewModel() {
             putBoolean("dex_ignore_field_initial", options.ignoreFieldInitialValues)
             apply()
         }
+    }
+
+    fun updateDexCompareOptions(options: DexCompareOptions) {
+        saveDexCompareOptions(options)
         val currentVirtual = _activeDexVirtualPath.value
         if (currentVirtual != null) {
             openDexVirtualComparison(currentVirtual)
-        } else {
+        } else if (_hasRunComparison.value) {
             runComparison()
         }
         _selectedFile.value?.let { fileStatus ->
@@ -579,6 +583,27 @@ class CompareViewModel : ViewModel() {
         _isProcessing.value = false
         _compareProgress.value = null
         _errorMessage.value = "Comparison cancelled by user"
+    }
+
+    private fun getRawFileBytes(isSource: Boolean, relativePath: String): ByteArray? {
+        val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
+        val isZip = if (isSource) _sourceIsZip.value else _modifiedIsZip.value
+        val zipFile = if (isSource) _sourceFile.value else _modifiedFile.value
+        if (isZip && zipFile != null && zipFile.exists()) {
+            return FileHelper.getZipEntryBytes(zipFile, cleanPath)
+        }
+        val dir = if (isSource) _sourceDir.value else _modifiedDir.value
+        if (dir != null) {
+            val file = File(dir, cleanPath)
+            if (file.exists() && file.isFile) {
+                return try { file.readBytes() } catch (e: Exception) { null }
+            }
+        }
+        val singleFile = if (isSource) _sourceFile.value else _modifiedFile.value
+        if (singleFile != null && singleFile.exists() && singleFile.isFile && !isZip) {
+            return try { singleFile.readBytes() } catch (e: Exception) { null }
+        }
+        return null
     }
 
     private fun getFileBytes(isSource: Boolean, relativePath: String): ByteArray? {

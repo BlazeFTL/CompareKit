@@ -1461,15 +1461,17 @@ fun CompareListScreen(
                             val isSingleFile = (sourceFile?.isFile == true && !sourceIsZip) || (modifiedFile?.isFile == true && !modifiedIsZip)
 
                             val titleText = when {
-                                progress != null -> "Comparing differences..."
-                                isZip -> "Extracting archives..."
+                                activeDexVirtualPath != null -> "Comparing DEX bytecode..."
+                                progress != null && progress > 0f -> "Comparing differences..."
+                                isZip -> "Analyzing APK packages..."
                                 isSingleFile -> "Loading file comparison..."
                                 else -> "Scanning directories..."
                             }
 
                             val subtitleText = when {
-                                progress != null -> "Processed ${(progress * 100).toInt()}% of files"
-                                isZip -> "Decompressing packages and analyzing file tree..."
+                                activeDexVirtualPath != null -> "Disassembling Dalvik bytecode into virtual Smali..."
+                                progress != null && progress > 0f -> "Processed ${(progress * 100).toInt()}% of files"
+                                isZip -> "Scanning APK archive entries and DEX bytecode..."
                                 isSingleFile -> "Preparing diff model..."
                                 else -> "Building index and computing checksums..."
                             }
@@ -1663,7 +1665,7 @@ fun CompareListScreen(
             onDismiss = { showDecompiledApkOptionsDialog = false },
             onConfirm = { finalOpts ->
                 showDecompiledApkOptionsDialog = false
-                viewModel.updateDexCompareOptions(finalOpts)
+                viewModel.saveDexCompareOptions(finalOpts)
                 viewModel.performComparison(context)
             }
         )
