@@ -232,7 +232,8 @@ class CompareViewModel : ViewModel() {
                     _activeDexVirtualPath.value = dexRelativePath.ifEmpty { "classes.dex" }
 
                     val allClassNames = (srcClasses.keys + modClasses.keys).sorted()
-                    val virtualSmaliList = allClassNames.map { className ->
+                    val virtualSmaliList = mutableListOf<FileCompareStatus>()
+                    for (className in allClassNames) {
                         val srcCls = srcClasses[className]
                         val modCls = modClasses[className]
 
@@ -248,18 +249,23 @@ class CompareViewModel : ViewModel() {
                             else -> FileStatus.ADDED
                         }
 
-                        val virtualPath = className.replace('.', '/') + ".smali"
+                        // For DEX bytecode comparisons, show only Modified, Added, and Deleted classes
+                        if (status != FileStatus.UNCHANGED) {
+                            val virtualPath = className.replace('.', '/') + ".smali"
 
-                        val sizeOrig = (srcCls?.methods?.size?.toLong() ?: 0L) * 120L + (srcCls?.fields?.size?.toLong() ?: 0L) * 40L
-                        val sizeMod = (modCls?.methods?.size?.toLong() ?: 0L) * 120L + (modCls?.fields?.size?.toLong() ?: 0L) * 40L
+                            val sizeOrig = (srcCls?.methods?.size?.toLong() ?: 0L) * 120L + (srcCls?.fields?.size?.toLong() ?: 0L) * 40L
+                            val sizeMod = (modCls?.methods?.size?.toLong() ?: 0L) * 120L + (modCls?.fields?.size?.toLong() ?: 0L) * 40L
 
-                        FileCompareStatus(
-                            relativePath = virtualPath,
-                            status = status,
-                            sizeOriginal = sizeOrig,
-                            sizeModified = sizeMod,
-                            isBinary = false
-                        )
+                            virtualSmaliList.add(
+                                FileCompareStatus(
+                                    relativePath = virtualPath,
+                                    status = status,
+                                    sizeOriginal = sizeOrig,
+                                    sizeModified = sizeMod,
+                                    isBinary = false
+                                )
+                            )
+                        }
                     }
 
                     _fileList.value = virtualSmaliList

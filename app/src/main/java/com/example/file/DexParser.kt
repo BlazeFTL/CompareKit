@@ -17,7 +17,8 @@ data class DexMethodData(
     val accessFlags: Int,
     val codeHash: String,
     val registersCount: Int = 0,
-    val instructions: List<String> = emptyList()
+    val instructions: List<String> = emptyList(),
+    val codeOff: Int = 0
 )
 
 data class DexClass(
@@ -27,7 +28,10 @@ data class DexClass(
     val fields: List<DexFieldData>,
     val methods: List<DexMethodData>,
     val signature: String,
-    val accessFlags: Int = 0
+    val accessFlags: Int = 0,
+    val dexBytes: ByteArray? = null,
+    val fieldIdsOff: Int = 0,
+    val methodIdsOff: Int = 0
 )
 
 enum class DexStatus {
@@ -136,7 +140,13 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
 
     var staticFields = this.fields.filter { it.accessFlags and 0x0008 != 0 }
     var instanceFields = this.fields.filter { it.accessFlags and 0x0008 == 0 }
-    var methodsList = this.methods
+    
+    val fullMethods = if (this.dexBytes != null && this.methods.any { it.instructions.isEmpty() && it.codeOff != 0 }) {
+        DexParser.disassembleClassMethods(this, options)
+    } else {
+        this.methods
+    }
+    var methodsList = fullMethods
 
     if (options.ignoreCompilationOptimizations) {
         // Filter out synthetic (0x1000) elements
@@ -1447,25 +1457,8 @@ object DexParser {
                             lastMethodIdx += idxDiff
 
                             val regCount = if (codeOff != 0) buffer.readUShort(codeOff) else 0
-                            val methodInstructions = if (codeOff != 0) {
-                                disassembleMethod(
-                                    buffer,
-                                    bytes,
-                                    codeOff,
-                                    ::resolveString,
-                                    ::resolveType,
-                                    ::resolveField,
-                                    ::resolveMethod,
-                                    fieldIdsOff,
-                                    methodIdsOff,
-                                    options
-                                )
-                            } else {
-                                emptyList()
-                            }
-                            val normalizedInstructions = normalizeInstructions(methodInstructions)
-                            val methodCodeHash = if (normalizedInstructions.isNotEmpty()) {
-                                md5(normalizedInstructions.joinToString("\n"))
+                            val methodCodeHash = if (codeOff != 0) {
+                                computeMethodCodeHash(buffer, bytes, codeOff, options)
                             } else {
                                 ""
                             }
@@ -1475,7 +1468,8 @@ object DexParser {
                                 accessFlags = flags,
                                 codeHash = methodCodeHash,
                                 registersCount = regCount,
-                                instructions = normalizedInstructions
+                                instructions = emptyList(),
+                                codeOff = codeOff
                             ))
                         }
 
@@ -1491,25 +1485,8 @@ object DexParser {
                             lastMethodIdx += idxDiff
 
                             val regCount = if (codeOff != 0) buffer.readUShort(codeOff) else 0
-                            val methodInstructions = if (codeOff != 0) {
-                                disassembleMethod(
-                                    buffer,
-                                    bytes,
-                                    codeOff,
-                                    ::resolveString,
-                                    ::resolveType,
-                                    ::resolveField,
-                                    ::resolveMethod,
-                                    fieldIdsOff,
-                                    methodIdsOff,
-                                    options
-                                )
-                            } else {
-                                emptyList()
-                            }
-                            val normalizedInstructions = normalizeInstructions(methodInstructions)
-                            val methodCodeHash = if (normalizedInstructions.isNotEmpty()) {
-                                md5(normalizedInstructions.joinToString("\n"))
+                            val methodCodeHash = if (codeOff != 0) {
+                                computeMethodCodeHash(buffer, bytes, codeOff, options)
                             } else {
                                 ""
                             }
@@ -1519,25 +1496,45 @@ object DexParser {
                                 accessFlags = flags,
                                 codeHash = methodCodeHash,
                                 registersCount = regCount,
-                                instructions = normalizedInstructions
+                                instructions = emptyList(),
+                                codeOff = codeOff
                             ))
                         }
                     }
 
-                    // Compute overall class signature based on the high-fidelity decompiled text representation
-                    val dexClassWithoutSig = DexClass(
+                    // Fast deterministic signature computation
+                    val sigSb = StringBuilder()
+                    sigSb.append(className).append(';').append(superClassName).append(';').append(accessFlags).append(';')
+                    for (iface in interfaceNames) sigSb.append(iface).append(';')
+                    for (f in fields) {
+                        val shouldOmitInitValue = options.ignoreCompilationOptimizations && isDefaultValue(f.typeName, f.initialValue)
+                        sigSb.append(f.name).append(':').append(f.typeName).append(':').append(f.accessFlags)
+                        if (f.initialValue != null && !shouldOmitInitValue && !options.ignoreFieldInitialValues) {
+                            sigSb.append('=').append(f.initialValue)
+                        }
+                        sigSb.append(';')
+                    }
+                    for (m in methods) {
+                        sigSb.append(m.name).append(':').append(m.signature).append(':').append(m.accessFlags)
+                        if (!options.ignoreRegisterCount) {
+                            sigSb.append(':').append(m.registersCount)
+                        }
+                        sigSb.append('#').append(m.codeHash).append(';')
+                    }
+                    val signature = md5(sigSb.toString())
+
+                    val dexClass = DexClass(
                         name = className,
                         superClassName = superClassName,
                         interfaceNames = interfaceNames,
                         fields = fields,
                         methods = methods,
-                        signature = "",
-                        accessFlags = accessFlags.toInt()
+                        signature = signature,
+                        accessFlags = accessFlags.toInt(),
+                        dexBytes = bytes,
+                        fieldIdsOff = fieldIdsOff,
+                        methodIdsOff = methodIdsOff
                     )
-                    val textRep = dexClassWithoutSig.toTextRepresentation(options)
-                    val signature = md5(textRep)
-
-                    val dexClass = dexClassWithoutSig.copy(signature = signature)
                     result[className] = dexClass
                 } catch (e: Exception) {
                     // Fail-safe: ignore failed classes
@@ -1548,6 +1545,121 @@ object DexParser {
         }
 
         return result
+    }
+
+    fun disassembleClassMethods(dexClass: DexClass, options: DexCompareOptions): List<DexMethodData> {
+        val bytes = dexClass.dexBytes ?: return dexClass.methods
+        return try {
+            val buffer = DexBuffer(bytes)
+            val stringIdsSize = buffer.readUInt(56)
+            val stringIdsOff = buffer.readUInt(60)
+            val typeIdsSize = buffer.readUInt(64)
+            val typeIdsOff = buffer.readUInt(68)
+            val protoIdsSize = buffer.readUInt(72)
+            val protoIdsOff = buffer.readUInt(76)
+            val fieldIdsSize = buffer.readUInt(80)
+            val fieldIdsOff = buffer.readUInt(84)
+            val methodIdsSize = buffer.readUInt(88)
+            val methodIdsOff = buffer.readUInt(92)
+
+            val stringCache = Array(stringIdsSize) { i ->
+                try {
+                    val off = buffer.readUInt(stringIdsOff + i * 4)
+                    buffer.readString(off)
+                } catch (e: Exception) { "" }
+            }
+            fun resolveString(idx: Int): String = if (idx in 0 until stringIdsSize) stringCache[idx] else ""
+
+            val typeCache = Array(typeIdsSize) { i ->
+                try {
+                    val descriptorIdx = buffer.readUInt(typeIdsOff + i * 4)
+                    resolveString(descriptorIdx)
+                } catch (e: Exception) { "" }
+            }
+            fun resolveType(idx: Int): String = if (idx in 0 until typeIdsSize) typeCache[idx] else ""
+
+            fun formatDescriptor(desc: String): String {
+                if (desc.isEmpty()) return ""
+                var arrayDepth = 0
+                var curr = desc
+                while (curr.startsWith("[")) {
+                    arrayDepth++
+                    curr = curr.substring(1)
+                }
+                var baseType = when (curr) {
+                    "V" -> "void"
+                    "Z" -> "boolean"
+                    "B" -> "byte"
+                    "S" -> "short"
+                    "C" -> "char"
+                    "I" -> "int"
+                    "J" -> "long"
+                    "F" -> "float"
+                    "D" -> "double"
+                    else -> {
+                        if (curr.startsWith("L") && curr.endsWith(";")) {
+                            curr.substring(1, curr.length - 1).replace('/', '.')
+                        } else {
+                            curr
+                        }
+                    }
+                }
+                repeat(arrayDepth) { baseType += "[]" }
+                return baseType
+            }
+
+            fun resolveField(fieldIdx: Int): DexFieldData {
+                if (fieldIdx in 0 until fieldIdsSize) {
+                    val typeIdx = buffer.readUShort(fieldIdsOff + fieldIdx * 8 + 2)
+                    val nameIdx = buffer.readUInt(fieldIdsOff + fieldIdx * 8 + 4)
+                    return DexFieldData(resolveString(nameIdx), formatDescriptor(resolveType(typeIdx)), 0)
+                }
+                return DexFieldData("unknown_field", "void", 0)
+            }
+
+            fun resolveMethod(methodIdx: Int): DexMethodData {
+                if (methodIdx in 0 until methodIdsSize) {
+                    val protoIdx = buffer.readUShort(methodIdsOff + methodIdx * 8 + 2)
+                    val nameIdx = buffer.readUInt(methodIdsOff + methodIdx * 8 + 4)
+                    val methodName = resolveString(nameIdx)
+                    val returnTypeIdx = buffer.readUInt(protoIdsOff + protoIdx * 12 + 4)
+                    val returnType = formatDescriptor(resolveType(returnTypeIdx.toInt()))
+                    val paramsOff = buffer.readUInt(protoIdsOff + protoIdx * 12 + 8)
+                    val params = mutableListOf<String>()
+                    if (paramsOff != 0) {
+                        val size = buffer.readUInt(paramsOff)
+                        for (p in 0 until size) {
+                            val typeIdx = buffer.readUShort(paramsOff + 4 + p * 2)
+                            params.add(formatDescriptor(resolveType(typeIdx)))
+                        }
+                    }
+                    return DexMethodData(methodName, "(${params.joinToString(", ")}) : $returnType", 0, "")
+                }
+                return DexMethodData("unknown_method", "() : void", 0, "")
+            }
+
+            dexClass.methods.map { m ->
+                if (m.codeOff != 0 && m.instructions.isEmpty()) {
+                    val raw = disassembleMethod(
+                        buffer,
+                        bytes,
+                        m.codeOff,
+                        ::resolveString,
+                        ::resolveType,
+                        ::resolveField,
+                        ::resolveMethod,
+                        fieldIdsOff,
+                        methodIdsOff,
+                        options
+                    )
+                    m.copy(instructions = normalizeInstructions(raw))
+                } else {
+                    m
+                }
+            }
+        } catch (e: Exception) {
+            dexClass.methods
+        }
     }
 }
 

@@ -44,6 +44,7 @@ import com.example.file.DexCompareOptions
 import com.example.file.FileCompareStatus
 import com.example.file.FileStatus
 import com.example.ui.components.CompareKitLogo
+import com.example.ui.components.CompareTreeView
 import com.example.ui.components.DecompiledApkOptionsDialog
 import com.example.ui.components.DiffSettingsDialog
 import com.example.ui.components.MinimapScrollbar
@@ -121,6 +122,7 @@ fun CompareListScreen(
     var exportFormatChoice by remember { mutableStateOf(0) } // 0 = .diff, 1 = .txt, 2 = .zip
     var showDecompiledApkOptionsDialog by remember { mutableStateOf(false) }
     var showExitConfirmationDialog by remember { mutableStateOf(false) }
+    var isTreeViewMode by rememberSaveable { mutableStateOf(true) }
     val lineHeightMultiplier by viewModel.lineHeightMultiplier.collectAsState()
     val activeDexVirtualPath by viewModel.activeDexVirtualPath.collectAsState()
 
@@ -1069,41 +1071,126 @@ fun CompareListScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState())
                                     .padding(horizontal = 16.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                FilterChipPill(
-                                    label = "All Files",
-                                    count = fileList.size,
-                                    isSelected = statusFilter == null,
-                                    onClick = { viewModel.updateStatusFilter(null) }
-                                )
-                                FilterChipPill(
-                                    label = "Modified",
-                                    count = modifiedCount,
-                                    isSelected = statusFilter == FileStatus.MODIFIED,
-                                    onClick = { viewModel.updateStatusFilter(FileStatus.MODIFIED) }
-                                )
-                                FilterChipPill(
-                                    label = "Added",
-                                    count = addedCount,
-                                    isSelected = statusFilter == FileStatus.ADDED,
-                                    onClick = { viewModel.updateStatusFilter(FileStatus.ADDED) }
-                                )
-                                FilterChipPill(
-                                    label = "Deleted",
-                                    count = deletedCount,
-                                    isSelected = statusFilter == FileStatus.DELETED,
-                                    onClick = { viewModel.updateStatusFilter(FileStatus.DELETED) }
-                                )
-                                FilterChipPill(
-                                    label = "Unchanged",
-                                    count = unchangedCount,
-                                    isSelected = statusFilter == FileStatus.UNCHANGED,
-                                    onClick = { viewModel.updateStatusFilter(FileStatus.UNCHANGED) }
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (activeDexVirtualPath != null) {
+                                        // DEX bytecode mode: Only show Modified, Added, and Deleted filter tabs
+                                        FilterChipPill(
+                                            label = "Modified",
+                                            count = modifiedCount,
+                                            isSelected = statusFilter == FileStatus.MODIFIED,
+                                            onClick = {
+                                                if (statusFilter == FileStatus.MODIFIED) viewModel.updateStatusFilter(null)
+                                                else viewModel.updateStatusFilter(FileStatus.MODIFIED)
+                                            }
+                                        )
+                                        FilterChipPill(
+                                            label = "Added",
+                                            count = addedCount,
+                                            isSelected = statusFilter == FileStatus.ADDED,
+                                            onClick = {
+                                                if (statusFilter == FileStatus.ADDED) viewModel.updateStatusFilter(null)
+                                                else viewModel.updateStatusFilter(FileStatus.ADDED)
+                                            }
+                                        )
+                                        FilterChipPill(
+                                            label = "Deleted",
+                                            count = deletedCount,
+                                            isSelected = statusFilter == FileStatus.DELETED,
+                                            onClick = {
+                                                if (statusFilter == FileStatus.DELETED) viewModel.updateStatusFilter(null)
+                                                else viewModel.updateStatusFilter(FileStatus.DELETED)
+                                            }
+                                        )
+                                    } else {
+                                        FilterChipPill(
+                                            label = "All Files",
+                                            count = fileList.size,
+                                            isSelected = statusFilter == null,
+                                            onClick = { viewModel.updateStatusFilter(null) }
+                                        )
+                                        FilterChipPill(
+                                            label = "Modified",
+                                            count = modifiedCount,
+                                            isSelected = statusFilter == FileStatus.MODIFIED,
+                                            onClick = { viewModel.updateStatusFilter(FileStatus.MODIFIED) }
+                                        )
+                                        FilterChipPill(
+                                            label = "Added",
+                                            count = addedCount,
+                                            isSelected = statusFilter == FileStatus.ADDED,
+                                            onClick = { viewModel.updateStatusFilter(FileStatus.ADDED) }
+                                        )
+                                        FilterChipPill(
+                                            label = "Deleted",
+                                            count = deletedCount,
+                                            isSelected = statusFilter == FileStatus.DELETED,
+                                            onClick = { viewModel.updateStatusFilter(FileStatus.DELETED) }
+                                        )
+                                        FilterChipPill(
+                                            label = "Unchanged",
+                                            count = unchangedCount,
+                                            isSelected = statusFilter == FileStatus.UNCHANGED,
+                                            onClick = { viewModel.updateStatusFilter(FileStatus.UNCHANGED) }
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (isTreeViewMode) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clickable { isTreeViewMode = true }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.AccountTree,
+                                                    contentDescription = "Tree View",
+                                                    tint = if (isTreeViewMode) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (!isTreeViewMode) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clickable { isTreeViewMode = false }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.ViewList,
+                                                    contentDescription = "List View",
+                                                    tint = if (!isTreeViewMode) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
                             // Ignore filter bar / input
@@ -1345,18 +1432,40 @@ fun CompareListScreen(
                                         )
                                         Spacer(modifier = Modifier.height(12.dp))
                                         Text(
-                                            "No Matching Files Found",
+                                            if (activeDexVirtualPath != null) "No Bytecode Differences" else "No Matching Files Found",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            "Try changing your search or status filter criteria.",
+                                            if (activeDexVirtualPath != null) {
+                                                if (fileList.isEmpty()) "This DEX file has identical classes with no modifications."
+                                                else "No classes match your search or filter."
+                                            } else "Try changing your search or status filter criteria.",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                                             modifier = Modifier.padding(top = 4.dp)
                                         )
                                     }
+                                }
+                            } else if (isTreeViewMode) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                ) {
+                                    CompareTreeView(
+                                        fileList = filteredList,
+                                        isDexView = activeDexVirtualPath != null,
+                                        onCompareFile = { fileStatus ->
+                                            if (fileStatus.relativePath.lowercase().endsWith(".dex")) {
+                                                viewModel.openDexVirtualComparison(fileStatus.relativePath)
+                                            } else {
+                                                viewModel.selectFileForDiff(fileStatus)
+                                            }
+                                        },
+                                        lazyListState = compareListState
+                                    )
                                 }
                             } else {
                                 Box(
