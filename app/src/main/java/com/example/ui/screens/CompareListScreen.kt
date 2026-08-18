@@ -122,6 +122,7 @@ fun CompareListScreen(
     var showDecompiledApkOptionsDialog by remember { mutableStateOf(false) }
     var showExitConfirmationDialog by remember { mutableStateOf(false) }
     val lineHeightMultiplier by viewModel.lineHeightMultiplier.collectAsState()
+    val activeDexVirtualPath by viewModel.activeDexVirtualPath.collectAsState()
 
     val saveAllDiffsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
@@ -143,7 +144,7 @@ fun CompareListScreen(
         }
     }
 
-    // Go back when in picker view if back is pressed
+    // Go back when in picker view or DEX virtual comparison if back is pressed
     if (activePickerTarget != PickerTarget.NONE) {
         val storageRoot = viewModel.storageRoot
         BackHandler {
@@ -153,6 +154,10 @@ fun CompareListScreen(
             } else {
                 viewModel.setActivePickerTarget(PickerTarget.NONE)
             }
+        }
+    } else if (activeDexVirtualPath != null) {
+        BackHandler {
+            viewModel.closeDexVirtualComparison()
         }
     } else if (hasRunComparison) {
         BackHandler {
@@ -960,48 +965,98 @@ fun CompareListScreen(
                                         .fillMaxWidth()
                                         .padding(horizontal = 16.dp, vertical = 12.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
+                                    if (activeDexVirtualPath != null) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                FilledTonalButton(
+                                                    onClick = { viewModel.closeDexVirtualComparison() },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                                        contentColor = MaterialTheme.colorScheme.primary
+                                                    ),
+                                                    modifier = Modifier.height(32.dp)
+                                                ) {
+                                                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.size(15.dp))
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("Back to APK", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                                Text(
+                                                    "DEX VIRTUAL SMALI",
+                                                    style = TextStyle(
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        letterSpacing = 1.4.sp,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            "COMPARING",
+                                            text = "$activeDexVirtualPath ($sourceName  ➔  $modifiedName)",
                                             style = TextStyle(
                                                 fontFamily = FontFamily.Monospace,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 1.4.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        )
-                                        FilledTonalButton(
-                                            onClick = { showExitConfirmationDialog = true },
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                            colors = ButtonDefaults.filledTonalButtonColors(
-                                                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                                contentColor = MaterialTheme.colorScheme.primary
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface
                                             ),
-                                            modifier = Modifier.height(32.dp)
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    } else {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Change", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "COMPARING",
+                                                style = TextStyle(
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    letterSpacing = 1.4.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            )
+                                            FilledTonalButton(
+                                                onClick = { showExitConfirmationDialog = true },
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                                colors = ButtonDefaults.filledTonalButtonColors(
+                                                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                                    contentColor = MaterialTheme.colorScheme.primary
+                                                ),
+                                                modifier = Modifier.height(32.dp)
+                                            ) {
+                                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Change", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "$sourceName  ➔  $modifiedName",
+                                            style = TextStyle(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "$sourceName  ➔  $modifiedName",
-                                        style = TextStyle(
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
                                 }
                             }
 
@@ -1323,7 +1378,11 @@ fun CompareListScreen(
                                             ModernFileCompareCard(
                                                 item = fileStatus,
                                                 onCompare = {
-                                                    viewModel.selectFileForDiff(fileStatus)
+                                                    if (fileStatus.relativePath.lowercase().endsWith(".dex")) {
+                                                        viewModel.openDexVirtualComparison(fileStatus.relativePath)
+                                                    } else {
+                                                        viewModel.selectFileForDiff(fileStatus)
+                                                    }
                                                 }
                                             )
                                         }
@@ -1789,11 +1848,7 @@ fun ModernFileCompareCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                if (isDexFile) {
-                    isExpanded = !isExpanded
-                } else {
-                    onCompare()
-                }
+                onCompare()
             },
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -1966,29 +2021,26 @@ fun ModernFileCompareCard(
                     }
 
                     if (isDexFile) {
-                        Surface(
+                        Button(
+                            onClick = onCompare,
                             shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (item.status == FileStatus.UNCHANGED) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                            )
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Info,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text(
-                                    text = "Decompile and then compare",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Icon(
+                                imageVector = if (item.status == FileStatus.UNCHANGED) Icons.Default.Visibility else Icons.Default.CompareArrows,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (item.status == FileStatus.UNCHANGED) "View DEX" else "Compare DEX",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     } else {
                         // Open Full Diff / View Button

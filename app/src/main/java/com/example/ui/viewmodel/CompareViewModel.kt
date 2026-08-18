@@ -21,6 +21,7 @@ import com.example.file.DexClassCompareStatus
 import com.example.file.DexStatus
 import com.example.file.DexClass
 import com.example.file.DexCompareOptions
+import com.example.file.toTextRepresentation
 import com.example.file.ArscParser
 import com.example.file.AxmlDecoder
 import com.example.ui.theme.AppTheme
@@ -141,6 +142,14 @@ class CompareViewModel : ViewModel() {
     private val _dexClassesList = MutableStateFlow<List<DexClassCompareStatus>>(emptyList())
     val dexClassesList: StateFlow<List<DexClassCompareStatus>> = _dexClassesList.asStateFlow()
 
+    private val _activeDexVirtualPath = MutableStateFlow<String?>(null)
+    val activeDexVirtualPath: StateFlow<String?> = _activeDexVirtualPath.asStateFlow()
+
+    private var parentComparisonFileList: List<FileCompareStatus>? = null
+
+    private val virtualDexSourceClasses = mutableMapOf<String, DexClass>()
+    private val virtualDexModifiedClasses = mutableMapOf<String, DexClass>()
+
     private val _dexSearchQuery = MutableStateFlow("")
     val dexSearchQuery: StateFlow<String> = _dexSearchQuery.asStateFlow()
 
@@ -186,6 +195,98 @@ class CompareViewModel : ViewModel() {
         _selectedDexClassDetail.value = classStatus
     }
 
+    fun openDexVirtualComparison(dexRelativePath: String) {
+        viewModelScope.launch {
+            _isProcessing.value = true
+            _compareProgress.value = 0f
+            withContext(Dispatchers.IO) {
+                try {
+                    if (_activeDexVirtualPath.value == null) {
+                        parentComparisonFileList = _fileList.value
+                    }
+                    _activeDexVirtualPath.value = dexRelativePath.ifEmpty { "classes.dex" }
+
+                    val cleanPath = dexRelativePath.removePrefix("/").replace('\\', '/')
+                    val srcBytes = if (cleanPath.isNotEmpty()) {
+                        getFileBytes(isSource = true, cleanPath) ?: ByteArray(0)
+                    } else {
+                        _sourceFile.value?.readBytes() ?: ByteArray(0)
+                    }
+                    val modBytes = if (cleanPath.isNotEmpty()) {
+                        getFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
+                    } else {
+                        _modifiedFile.value?.readBytes() ?: ByteArray(0)
+                    }
+
+                    val opts = _dexCompareOptions.value
+                    val srcClasses = if (srcBytes.isNotEmpty()) DexParser.parse(srcBytes, opts) else emptyMap()
+                    val modClasses = if (modBytes.isNotEmpty()) DexParser.parse(modBytes, opts) else emptyMap()
+
+                    synchronized(virtualDexSourceClasses) {
+                        virtualDexSourceClasses.clear()
+                        virtualDexSourceClasses.putAll(srcClasses)
+                    }
+                    synchronized(virtualDexModifiedClasses) {
+                        virtualDexModifiedClasses.clear()
+                        virtualDexModifiedClasses.putAll(modClasses)
+                    }
+
+                    val allClassNames = (srcClasses.keys + modClasses.keys).sorted()
+                    val virtualSmaliList = allClassNames.map { className ->
+                        val srcCls = srcClasses[className]
+                        val modCls = modClasses[className]
+
+                        val status = when {
+                            srcCls != null && modCls != null -> {
+                                if (srcCls.signature == modCls.signature) {
+                                    FileStatus.UNCHANGED
+                                } else {
+                                    FileStatus.MODIFIED
+                                }
+                            }
+                            srcCls != null -> FileStatus.DELETED
+                            else -> FileStatus.ADDED
+                        }
+
+                        val virtualPath = className.replace('.', '/') + ".smali"
+
+                        val sizeOrig = (srcCls?.methods?.size?.toLong() ?: 0L) * 120L + (srcCls?.fields?.size?.toLong() ?: 0L) * 40L
+                        val sizeMod = (modCls?.methods?.size?.toLong() ?: 0L) * 120L + (modCls?.fields?.size?.toLong() ?: 0L) * 40L
+
+                        FileCompareStatus(
+                            relativePath = virtualPath,
+                            status = status,
+                            sizeOriginal = sizeOrig,
+                            sizeModified = sizeMod,
+                            isBinary = false
+                        )
+                    }
+
+                    _fileList.value = virtualSmaliList
+                    _searchQuery.value = ""
+                    _statusFilter.value = null
+                } catch (e: Exception) {
+                    _errorMessage.value = "Failed to parse DEX bytecode: ${e.localizedMessage}"
+                } finally {
+                    _isProcessing.value = false
+                    _compareProgress.value = null
+                }
+            }
+        }
+    }
+
+    fun closeDexVirtualComparison() {
+        if (parentComparisonFileList != null) {
+            _fileList.value = parentComparisonFileList ?: emptyList()
+            parentComparisonFileList = null
+        }
+        _activeDexVirtualPath.value = null
+        _selectedFile.value = null
+        _diffLines.value = emptyList()
+        synchronized(virtualDexSourceClasses) { virtualDexSourceClasses.clear() }
+        synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses.clear() }
+    }
+
     fun updateDexCompareOptions(options: DexCompareOptions) {
         _dexCompareOptions.value = options
         sharedPrefs?.edit()?.apply {
@@ -196,7 +297,12 @@ class CompareViewModel : ViewModel() {
             putBoolean("dex_ignore_field_initial", options.ignoreFieldInitialValues)
             apply()
         }
-        runComparison()
+        val currentVirtual = _activeDexVirtualPath.value
+        if (currentVirtual != null) {
+            openDexVirtualComparison(currentVirtual)
+        } else {
+            runComparison()
+        }
         _selectedFile.value?.let { fileStatus ->
             loadDiffForFile(fileStatus)
         }
@@ -477,6 +583,16 @@ class CompareViewModel : ViewModel() {
 
     private fun getFileBytes(isSource: Boolean, relativePath: String): ByteArray? {
         val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
+        if (_activeDexVirtualPath.value != null) {
+            val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+            val cls = if (isSource) {
+                synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
+            } else {
+                synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
+            }
+            val text = cls?.toTextRepresentation(_dexCompareOptions.value) ?: ""
+            return text.toByteArray(Charsets.UTF_8)
+        }
         val isZip = if (isSource) _sourceIsZip.value else _modifiedIsZip.value
         val zipFile = if (isSource) _sourceFile.value else _modifiedFile.value
         if (isZip && zipFile != null && zipFile.exists()) {
@@ -498,6 +614,16 @@ class CompareViewModel : ViewModel() {
 
     private fun getFileLines(isSource: Boolean, relativePath: String): List<String> {
         val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
+        if (_activeDexVirtualPath.value != null) {
+            val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+            val cls = if (isSource) {
+                synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
+            } else {
+                synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
+            }
+            val text = cls?.toTextRepresentation(_dexCompareOptions.value) ?: ""
+            return if (text.isNotEmpty()) text.lines() else emptyList()
+        }
         val isZip = if (isSource) _sourceIsZip.value else _modifiedIsZip.value
         val zipFile = if (isSource) _sourceFile.value else _modifiedFile.value
         if (isZip && zipFile != null && zipFile.exists()) {
@@ -527,6 +653,15 @@ class CompareViewModel : ViewModel() {
             _compareProgress.value = 0f
             _errorMessage.value = null
             try {
+                val isBothDex = srcFile.name.lowercase().endsWith(".dex") && modFile.name.lowercase().endsWith(".dex")
+                if (isBothDex) {
+                    _sourceDir.value = null
+                    _modifiedDir.value = null
+                    _hasRunComparison.value = true
+                    openDexVirtualComparison("")
+                    return@launch
+                }
+
                 val isBothZip = _sourceIsZip.value && _modifiedIsZip.value
 
                 if (isBothZip) {
@@ -814,6 +949,34 @@ class CompareViewModel : ViewModel() {
             withContext(Dispatchers.IO) {
                 try {
                     val cleanPath = fileStatus.relativePath.removePrefix("/")
+
+                    if (_activeDexVirtualPath.value != null) {
+                        val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+                        val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
+                        val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
+
+                        val opts = _dexCompareOptions.value
+                        val srcSmali = srcCls?.toTextRepresentation(opts) ?: ""
+                        val modSmali = modCls?.toTextRepresentation(opts) ?: ""
+
+                        var srcLines = if (srcSmali.isNotEmpty()) srcSmali.lines() else emptyList()
+                        var modLines = if (modSmali.isNotEmpty()) modSmali.lines() else emptyList()
+
+                        srcLines = DexParser.preprocessSmali(srcLines, opts)
+                        modLines = DexParser.preprocessSmali(modLines, opts)
+
+                        if (_beautifierEnabled.value) {
+                            val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
+                            val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
+                            srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                            modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                        }
+
+                        val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                        _diffLines.value = diff
+                        return@withContext
+                    }
+
                     val srcBytes = getFileBytes(isSource = true, cleanPath) ?: ByteArray(0)
                     val modBytes = getFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
 
