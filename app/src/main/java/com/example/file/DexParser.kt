@@ -44,7 +44,7 @@ data class DexClassCompareStatus(
 data class DexCompareOptions(
     val ignoreDebugInfo: Boolean = true,
     val ignoreCompilationOptimizations: Boolean = true,
-    val ignoreRegisterCount: Boolean = true,
+    val ignoreRegisterCount: Boolean = false,
     val ignoreNopInstruction: Boolean = true,
     val ignoreFieldInitialValues: Boolean = true
 )
