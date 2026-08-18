@@ -44,6 +44,7 @@ import com.example.file.DexCompareOptions
 import com.example.file.FileCompareStatus
 import com.example.file.FileStatus
 import com.example.ui.components.CompareKitLogo
+import com.example.ui.components.DecompiledApkOptionsDialog
 import com.example.ui.components.DiffSettingsDialog
 import com.example.ui.components.MinimapScrollbar
 import com.example.ui.viewmodel.CompareViewModel
@@ -118,6 +119,7 @@ fun CompareListScreen(
 
     var showExportDialog by remember { mutableStateOf(false) }
     var exportFormatChoice by remember { mutableStateOf(0) } // 0 = .diff, 1 = .txt, 2 = .zip
+    var showDecompiledApkOptionsDialog by remember { mutableStateOf(false) }
     var showExitConfirmationDialog by remember { mutableStateOf(false) }
     val lineHeightMultiplier by viewModel.lineHeightMultiplier.collectAsState()
 
@@ -908,7 +910,11 @@ fun CompareListScreen(
                                 ) {
                                     Button(
                                         onClick = {
-                                            viewModel.performComparison(context)
+                                            if (viewModel.isDecompiledApkComparison()) {
+                                                showDecompiledApkOptionsDialog = true
+                                            } else {
+                                                viewModel.performComparison(context)
+                                            }
                                         },
                                         shape = RoundedCornerShape(14.dp),
                                         modifier = Modifier
@@ -1588,6 +1594,18 @@ fun CompareListScreen(
                 viewModel.updateDexCompareOptions(dexOpts)
                 viewModel.setLineHeightMultiplier(heightMultiplier)
                 showSettingsDialog = false
+            }
+        )
+    }
+
+    if (showDecompiledApkOptionsDialog) {
+        DecompiledApkOptionsDialog(
+            currentOptions = dexCompareOptions,
+            onDismiss = { showDecompiledApkOptionsDialog = false },
+            onConfirm = { finalOpts ->
+                showDecompiledApkOptionsDialog = false
+                viewModel.updateDexCompareOptions(finalOpts)
+                viewModel.performComparison(context)
             }
         )
     }

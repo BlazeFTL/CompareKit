@@ -702,11 +702,31 @@ fun DecompiledApkOptionsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        icon = {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        },
+        shape = RoundedCornerShape(24.dp),
         title = {
             Text(
-                "Decompiled APK Comparison",
+                "APK & Bytecode Options",
                 fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleLarge
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center
             )
         },
         text = {
@@ -714,24 +734,26 @@ fun DecompiledApkOptionsDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = "Configure DEX and Smali bytecode diff options:",
+                    text = "Configure DEX and Smali comparison rules:",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 
+                Spacer(modifier = Modifier.height(4.dp))
+
                 SettingsSwitchRow(
                     title = "Ignore Debug Info",
-                    subtitle = "Skip line numbers & debug tables",
+                    subtitle = "Skip line numbers, local tables & debug info",
                     checked = ignoreDebugInfo,
                     onCheckedChange = { ignoreDebugInfo = it }
                 )
                 
                 SettingsSwitchRow(
                     title = "Ignore Compilation Optimization",
-                    subtitle = "Skip synthetic helpers & bytecode shifts",
+                    subtitle = "Skip synthetic helpers & bytecode variations",
                     checked = ignoreCompilationOptimizations,
                     onCheckedChange = { ignoreCompilationOptimizations = it }
                 )
@@ -752,7 +774,7 @@ fun DecompiledApkOptionsDialog(
 
                 SettingsSwitchRow(
                     title = "Ignore Field Default Values",
-                    subtitle = "Skip default/null field initializers",
+                    subtitle = "Skip default/null field initializers in Smali",
                     checked = ignoreFieldInitialValues,
                     onCheckedChange = { ignoreFieldInitialValues = it }
                 )
@@ -770,14 +792,24 @@ fun DecompiledApkOptionsDialog(
                             ignoreFieldInitialValues = ignoreFieldInitialValues
                         )
                     )
-                }
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
             ) {
-                Text("Start Comparison")
+                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Start Comparison", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            TextButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     )

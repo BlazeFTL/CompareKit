@@ -188,6 +188,14 @@ class CompareViewModel : ViewModel() {
 
     fun updateDexCompareOptions(options: DexCompareOptions) {
         _dexCompareOptions.value = options
+        sharedPrefs?.edit()?.apply {
+            putBoolean("dex_ignore_debug_info", options.ignoreDebugInfo)
+            putBoolean("dex_ignore_compilation_opt", options.ignoreCompilationOptimizations)
+            putBoolean("dex_ignore_register_count", options.ignoreRegisterCount)
+            putBoolean("dex_ignore_nop", options.ignoreNopInstruction)
+            putBoolean("dex_ignore_field_initial", options.ignoreFieldInitialValues)
+            apply()
+        }
         runComparison()
         _selectedFile.value?.let { fileStatus ->
             loadDiffForFile(fileStatus)
@@ -429,17 +437,21 @@ class CompareViewModel : ViewModel() {
         
         fun isDecompiled(file: File): Boolean {
             if (!file.exists()) return false
+            val lowerName = file.name.lowercase()
+            if (lowerName.endsWith(".apk") || lowerName.endsWith(".smali") || lowerName.endsWith(".dex")) {
+                return true
+            }
             if (file.isDirectory) {
-                val hasSmali = File(file, "smali").exists()
+                val hasSmali = File(file, "smali").exists() || file.walkTopDown().maxDepth(3).any { it.extension.lowercase() == "smali" || it.extension.lowercase() == "dex" }
                 val hasManifest = File(file, "AndroidManifest.xml").exists()
                 return hasSmali || hasManifest
-            } else if (file.name.lowercase().endsWith(".zip") || file.name.lowercase().endsWith(".apk")) {
+            } else if (lowerName.endsWith(".zip")) {
                 try {
                     java.util.zip.ZipFile(file).use { zip ->
                         val entries = zip.entries()
                         while (entries.hasMoreElements()) {
                             val name = entries.nextElement().name
-                            if (name.startsWith("smali/") || name == "AndroidManifest.xml" || name == "res/") {
+                            if (name.startsWith("smali/") || name == "AndroidManifest.xml" || name == "res/" || name.endsWith(".dex")) {
                                 return true
                             }
                         }
@@ -451,7 +463,7 @@ class CompareViewModel : ViewModel() {
             return false
         }
         
-        return isDecompiled(src) && isDecompiled(mod)
+        return isDecompiled(src) || isDecompiled(mod)
     }
 
     private var comparisonJob: kotlinx.coroutines.Job? = null
@@ -759,6 +771,20 @@ class CompareViewModel : ViewModel() {
             _appTheme.value = AppTheme.FOREST
         }
         _lineHeightMultiplier.value = sharedPrefs?.getFloat("line_height_multiplier", 1.15f) ?: 1.15f
+
+        val ignoreDebugInfo = sharedPrefs?.getBoolean("dex_ignore_debug_info", true) ?: true
+        val ignoreCompilationOptimizations = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", true) ?: true
+        val ignoreRegisterCount = sharedPrefs?.getBoolean("dex_ignore_register_count", false) ?: false
+        val ignoreNopInstruction = sharedPrefs?.getBoolean("dex_ignore_nop", true) ?: true
+        val ignoreFieldInitialValues = sharedPrefs?.getBoolean("dex_ignore_field_initial", true) ?: true
+
+        _dexCompareOptions.value = DexCompareOptions(
+            ignoreDebugInfo = ignoreDebugInfo,
+            ignoreCompilationOptimizations = ignoreCompilationOptimizations,
+            ignoreRegisterCount = ignoreRegisterCount,
+            ignoreNopInstruction = ignoreNopInstruction,
+            ignoreFieldInitialValues = ignoreFieldInitialValues
+        )
     }
 
     fun setAppTheme(theme: AppTheme) {
