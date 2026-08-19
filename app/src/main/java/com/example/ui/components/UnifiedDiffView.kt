@@ -105,10 +105,10 @@ fun UnifiedDiffView(
     val monoCodeStyle = TextStyle(
         fontSize = fontSizeSp.sp,
         fontFamily = FontFamily.Monospace,
-        lineHeight = (fontSizeSp * lineHeightMultiplier * 1.18f).sp,
+        lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
         lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
             alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both
+            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
         ),
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
@@ -116,10 +116,10 @@ fun UnifiedDiffView(
     val monoLineNumStyle = TextStyle(
         fontSize = effectiveLineNumFontSize.sp,
         fontFamily = FontFamily.Monospace,
-        lineHeight = (fontSizeSp * lineHeightMultiplier * 1.18f).sp,
+        lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
         lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
             alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both
+            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
         ),
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
@@ -201,12 +201,8 @@ fun UnifiedDiffView(
                         val revLineNum = item.revisedIndex?.plus(1)?.toString() ?: ""
 
                         val isActiveLine = index in activeBlockLineRange
-                        val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).dp
-                        val verticalLinePadding = if (lineHeightMultiplier > 1.0f) {
-                            ((lineHeightMultiplier - 1.0f) * fontSizeSp * 0.35f).dp
-                        } else {
-                            0.dp
-                        }
+                        val minLineRowHeight = (fontSizeSp * lineHeightMultiplier).dp
+                        val verticalLinePadding = ((lineHeightMultiplier - 1.20f).coerceAtLeast(0f) * fontSizeSp * 0.16f).dp
 
                         Row(
                             modifier = Modifier

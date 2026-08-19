@@ -158,7 +158,7 @@ fun EditFileDialog(
 fun DiffSettingsDialog(
     options: DiffOptions,
     beautifierEnabled: Boolean,
-    lineHeightMultiplier: Float = 1.15f,
+    lineHeightMultiplier: Float = 1.40f,
     isDecompiledApk: Boolean = false,
     dexOptions: DexCompareOptions = DexCompareOptions(),
     onDismiss: () -> Unit,
@@ -177,10 +177,11 @@ fun DiffSettingsDialog(
     var isPresetsExpanded by remember { mutableStateOf(false) }
 
     val densityLabel = when {
-        currentLineHeight <= 0.85f -> "Dense"
-        currentLineHeight <= 1.05f -> "Compact"
-        currentLineHeight <= 1.25f -> "Normal"
-        else -> "Relaxed"
+        currentLineHeight <= 0.95f -> "Dense"
+        currentLineHeight <= 1.20f -> "Compact"
+        currentLineHeight <= 1.50f -> "Normal"
+        currentLineHeight <= 1.80f -> "Comfortable"
+        else -> "Spacious"
     }
 
     Dialog(
@@ -401,7 +402,7 @@ fun DiffSettingsDialog(
                             Slider(
                                 value = currentLineHeight,
                                 onValueChange = { currentLineHeight = (kotlin.math.round(it * 20f) / 20f) },
-                                valueRange = 0.70f..1.60f,
+                                valueRange = 0.80f..2.20f,
                                 colors = SliderDefaults.colors(
                                     thumbColor = MaterialTheme.colorScheme.primary,
                                     activeTrackColor = MaterialTheme.colorScheme.primary,
@@ -417,12 +418,12 @@ fun DiffSettingsDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "0.70x (Dense)",
+                                    text = "0.80x (Dense)",
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "1.60x (Spacious)",
+                                    text = "2.20x (Spacious)",
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -441,10 +442,11 @@ fun DiffSettingsDialog(
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     val presets = listOf(
-                                        Triple("Dense", 0.75f, "Maximum code visibility on screen"),
-                                        Triple("Compact", 1.00f, "Standard single line spacing"),
-                                        Triple("Normal", 1.15f, "Recommended default line height"),
-                                        Triple("Relaxed", 1.40f, "Spacious line padding for readability")
+                                        Triple("Dense", 0.90f, "Maximum code lines on screen"),
+                                        Triple("Compact", 1.15f, "Tight single-line spacing"),
+                                        Triple("Normal", 1.40f, "Recommended default comfortable height"),
+                                        Triple("Comfortable", 1.65f, "Spacious line padding for readability"),
+                                        Triple("Spacious", 1.95f, "Generous room between code lines")
                                     )
 
                                     presets.forEach { (label, value, desc) ->

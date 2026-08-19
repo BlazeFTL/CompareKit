@@ -1741,10 +1741,18 @@ fun CompareListScreen(
             dexOptions = dexCompareOptions,
             onDismiss = { showSettingsDialog = false },
             onSave = { opts, pretty, dexOpts, heightMultiplier ->
-                viewModel.updateDiffOptions(opts)
-                viewModel.setBeautifierEnabled(pretty)
-                viewModel.updateDexCompareOptions(dexOpts)
-                viewModel.setLineHeightMultiplier(heightMultiplier)
+                if (diffOptions != opts) {
+                    viewModel.updateDiffOptions(opts)
+                }
+                if (beautifierEnabled != pretty) {
+                    viewModel.setBeautifierEnabled(pretty)
+                }
+                if (dexCompareOptions != dexOpts) {
+                    viewModel.updateDexCompareOptions(dexOpts)
+                }
+                if (lineHeightMultiplier != heightMultiplier) {
+                    viewModel.setLineHeightMultiplier(heightMultiplier)
+                }
                 showSettingsDialog = false
             }
         )

@@ -386,7 +386,7 @@ fun FileCompareScreen(
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                                     )
 
-                                    // SECTION 3: FONT ZOOM ROW
+                                    // SECTION 3: FONT & LINE SPACING
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -445,12 +445,72 @@ fun FileCompareScreen(
                                         }
                                     }
 
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.DensityMedium,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Text(
+                                                text = "Line Height",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            FilledTonalIconButton(
+                                                onClick = {
+                                                    val newMultiplier = (kotlin.math.round((lineHeightMultiplier - 0.15f) * 20f) / 20f).coerceIn(0.80f, 2.20f)
+                                                    viewModel.setLineHeightMultiplier(newMultiplier)
+                                                },
+                                                modifier = Modifier.size(28.dp),
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Icon(Icons.Default.Remove, contentDescription = "Decrease Line Height", modifier = Modifier.size(14.dp))
+                                            }
+
+                                            Text(
+                                                text = "${String.format(java.util.Locale.US, "%.2f", lineHeightMultiplier)}x",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(horizontal = 4.dp)
+                                            )
+
+                                            FilledTonalIconButton(
+                                                onClick = {
+                                                    val newMultiplier = (kotlin.math.round((lineHeightMultiplier + 0.15f) * 20f) / 20f).coerceIn(0.80f, 2.20f)
+                                                    viewModel.setLineHeightMultiplier(newMultiplier)
+                                                },
+                                                modifier = Modifier.size(28.dp),
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Icon(Icons.Default.Add, contentDescription = "Increase Line Height", modifier = Modifier.size(14.dp))
+                                            }
+                                        }
+                                    }
+
                                     HorizontalDivider(
                                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                                     )
 
-                                    // SECTION 4: ACTIONS (GO TO LINE & EXPORT)
+                                    // SECTION 4: ACTIONS (GO TO LINE, EXPORT & SETTINGS)
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -531,6 +591,50 @@ fun FileCompareScreen(
                                                 )
                                                 Text(
                                                     text = "Save HTML / Patch / Text",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+
+                                        Icon(
+                                            imageVector = Icons.Outlined.ArrowForwardIos,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showSettingsDialog = true
+                                                showMenu = false
+                                            }
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Tune,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Column {
+                                                Text(
+                                                    text = "Comparison Settings",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                                Text(
+                                                    text = "Whitespace, DEX & editor rules",
                                                     style = MaterialTheme.typography.bodySmall,
                                                     fontSize = 11.sp,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1064,10 +1168,18 @@ fun FileCompareScreen(
             dexOptions = dexCompareOptions,
             onDismiss = { showSettingsDialog = false },
             onSave = { opts, pretty, dexOpts, heightMultiplier ->
-                viewModel.updateDiffOptions(opts)
-                viewModel.setBeautifierEnabled(pretty)
-                viewModel.updateDexCompareOptions(dexOpts)
-                viewModel.setLineHeightMultiplier(heightMultiplier)
+                if (diffOptions != opts) {
+                    viewModel.updateDiffOptions(opts)
+                }
+                if (beautifierEnabled != pretty) {
+                    viewModel.setBeautifierEnabled(pretty)
+                }
+                if (dexCompareOptions != dexOpts) {
+                    viewModel.updateDexCompareOptions(dexOpts)
+                }
+                if (lineHeightMultiplier != heightMultiplier) {
+                    viewModel.setLineHeightMultiplier(heightMultiplier)
+                }
                 showSettingsDialog = false
             }
         )

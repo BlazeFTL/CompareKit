@@ -99,7 +99,7 @@ class CompareViewModel : ViewModel() {
     private val _lineWrapEnabled = MutableStateFlow(true)
     val lineWrapEnabled: StateFlow<Boolean> = _lineWrapEnabled.asStateFlow()
 
-    private val _lineHeightMultiplier = MutableStateFlow(1.15f)
+    private val _lineHeightMultiplier = MutableStateFlow(1.40f)
     val lineHeightMultiplier: StateFlow<Float> = _lineHeightMultiplier.asStateFlow()
 
     private val _activeFileSearchQuery = MutableStateFlow("")
@@ -325,6 +325,7 @@ class CompareViewModel : ViewModel() {
     }
 
     fun updateDexCompareOptions(options: DexCompareOptions) {
+        if (_dexCompareOptions.value == options) return
         saveDexCompareOptions(options)
         val currentVirtual = _activeDexVirtualPath.value
         if (currentVirtual != null) {
@@ -916,6 +917,7 @@ class CompareViewModel : ViewModel() {
     }
 
     fun updateDiffOptions(options: DiffOptions) {
+        if (_diffOptions.value == options) return
         _diffOptions.value = options
         runComparison()
         _selectedFile.value?.let { fileStatus ->
@@ -924,6 +926,7 @@ class CompareViewModel : ViewModel() {
     }
 
     fun setBeautifierEnabled(enabled: Boolean) {
+        if (_beautifierEnabled.value == enabled) return
         _beautifierEnabled.value = enabled
         if (_selectedFile.value != null) {
             loadDiffForFile(_selectedFile.value!!)
@@ -943,8 +946,9 @@ class CompareViewModel : ViewModel() {
     }
 
     fun setLineHeightMultiplier(multiplier: Float) {
-        _lineHeightMultiplier.value = multiplier.coerceIn(0.65f, 2.0f)
-        sharedPrefs?.edit()?.putFloat("line_height_multiplier", _lineHeightMultiplier.value)?.apply()
+        val clamped = multiplier.coerceIn(0.80f, 2.50f)
+        _lineHeightMultiplier.value = clamped
+        sharedPrefs?.edit()?.putFloat("line_height_multiplier", clamped)?.apply()
     }
 
     fun loadTheme(context: Context) {
@@ -955,7 +959,7 @@ class CompareViewModel : ViewModel() {
         } catch (e: Exception) {
             _appTheme.value = AppTheme.FOREST
         }
-        _lineHeightMultiplier.value = sharedPrefs?.getFloat("line_height_multiplier", 1.15f) ?: 1.15f
+        _lineHeightMultiplier.value = sharedPrefs?.getFloat("line_height_multiplier", 1.40f) ?: 1.40f
 
         val ignoreDebugInfo = sharedPrefs?.getBoolean("dex_ignore_debug_info", true) ?: true
         val ignoreCompilationOptimizations = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", true) ?: true
