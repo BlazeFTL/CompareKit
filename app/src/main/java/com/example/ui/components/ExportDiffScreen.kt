@@ -65,7 +65,8 @@ fun ExportDiffScreen(
     onDismiss: () -> Unit,
     onConfirmExport: (formatIndex: Int) -> Unit,
     isSingleFile: Boolean = false,
-    fileName: String = "export.html"
+    fileName: String = "export.html",
+    showZipOption: Boolean = true
 ) {
     var selectedFormat by remember { mutableStateOf(0) } // 0 = .diff, 1 = .txt, 2 = .zip
 
@@ -176,24 +177,26 @@ fun ExportDiffScreen(
                     // Option 1: Side-by-Side Text Report (.txt)
                     ExportFormatOptionCard(
                         title = "Text Report (.txt)",
-                        badge = "Human-Readable",
-                        description = "Clean formatted comparison showing both files side-by-side with line numbers.",
+                        badge = "Stock vs Mod Lines",
+                        description = "Clear line-by-line comparison pulling the stock file lines vs changed modified lines.",
                         icon = Icons.Default.Description,
                         isSelected = selectedFormat == 1,
                         onClick = { selectedFormat = 1 }
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    if (showZipOption) {
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                    // Option 2: Archive (.zip)
-                    ExportFormatOptionCard(
-                        title = "Full Archive (.zip)",
-                        badge = "Complete Bundle",
-                        description = "ZIP file containing original source and modified files along with complete logs.",
-                        icon = Icons.Default.FolderZip,
-                        isSelected = selectedFormat == 2,
-                        onClick = { selectedFormat = 2 }
-                    )
+                        // Option 2: Archive (.zip)
+                        ExportFormatOptionCard(
+                            title = "Folder Archive (.zip)",
+                            badge = "Stock & Mod Folders",
+                            description = "Extracts changed files into Stock/ and Mod/ folders preserving exact directory paths.",
+                            icon = Icons.Default.FolderZip,
+                            isSelected = selectedFormat == 2,
+                            onClick = { selectedFormat = 2 }
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(24.dp))
 

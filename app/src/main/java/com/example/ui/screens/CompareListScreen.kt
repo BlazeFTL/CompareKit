@@ -1781,6 +1781,7 @@ fun CompareListScreen(
         com.example.ui.components.ExportDiffScreen(
             onDismiss = { showExportDialog = false },
             isSingleFile = false,
+            showZipOption = viewModel.isZipExportSupported(),
             fileName = defaultName,
             onConfirmExport = { chosenFormatIndex ->
                 showExportDialog = false

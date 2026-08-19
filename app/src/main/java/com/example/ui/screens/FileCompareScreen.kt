@@ -1080,6 +1080,7 @@ fun FileCompareScreen(
         com.example.ui.components.ExportDiffScreen(
             onDismiss = { showExportDialog = false },
             isSingleFile = true,
+            showZipOption = viewModel.isZipExportSupported(),
             fileName = defaultName,
             onConfirmExport = { chosenFormatIndex ->
                 showExportDialog = false

@@ -162,7 +162,12 @@ object FileHelper {
                 val clean = entryPath.removePrefix("/").replace('\\', '/')
                 val entry = zip.getEntry(clean) ?: zip.getEntry("/$clean")
                 if (entry != null) {
-                    zip.getInputStream(entry).bufferedReader().readLines()
+                    val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                    if (clean.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(bytes)) {
+                        AxmlDecoder.decode(bytes).lines()
+                    } else {
+                        String(bytes, Charsets.UTF_8).lines()
+                    }
                 } else null
             }
         } catch (e: Exception) {
@@ -235,21 +240,14 @@ object FileHelper {
                         val modEntry = modEntries[path]
 
                         val result = if (srcEntry != null && modEntry != null) {
-                            // 1. Fast CRC32 check (0 disk/decompression I/O!)
+                            // 1. Fast CRC32 check (0 disk/decompression I/O)
                             val status = if (srcEntry.crc != -1L && srcEntry.crc == modEntry.crc && srcEntry.size == modEntry.size) {
                                 FileStatus.UNCHANGED
                             } else {
                                 val isBin = isBinaryExtension(path)
                                 if (path.lowercase().endsWith(".dex")) {
-                                    val srcBytes = if (srcZip != null) srcZip.getInputStream(srcEntry).use { it.readBytes() } else ByteArray(0)
-                                    val modBytes = if (modZip != null) modZip.getInputStream(modEntry).use { it.readBytes() } else ByteArray(0)
-                                    if (srcBytes.contentEquals(modBytes)) {
-                                        FileStatus.UNCHANGED
-                                    } else if (DexParser.areDexFilesSemanticallyEqual(srcBytes, modBytes, dexOptions)) {
-                                        FileStatus.UNCHANGED
-                                    } else {
-                                        FileStatus.MODIFIED
-                                    }
+                                    // Differing dex bytes: fast mark as MODIFIED for archive list
+                                    FileStatus.MODIFIED
                                 } else if (path.lowercase().endsWith(".xml")) {
                                     val srcBytes = if (srcZip != null) srcZip.getInputStream(srcEntry).use { it.readBytes() } else ByteArray(0)
                                     val modBytes = if (modZip != null) modZip.getInputStream(modEntry).use { it.readBytes() } else ByteArray(0)
@@ -324,7 +322,7 @@ object FileHelper {
             modZip?.close()
         }
 
-        // Post-processing for detecting Moved / Renamed files (e.g. res/values/a.xml -> asset/a.xml)
+        // Fast O(N) Post-processing for detecting Moved / Renamed files (e.g. res/values/a.xml -> asset/a.xml)
         val unchangedAndModified = rawResults.filter { it.status == FileStatus.UNCHANGED || it.status == FileStatus.MODIFIED }
         val candidateDeleted = rawResults.filter { it.status == FileStatus.DELETED }
         val candidateAdded = rawResults.filter { it.status == FileStatus.ADDED }
@@ -334,56 +332,31 @@ object FileHelper {
             val matchedAdded = mutableSetOf<String>()
             val matchedDeleted = mutableSetOf<String>()
 
-            // Pass 1: Match by CRC & size
-            for (add in candidateAdded) {
-                val modEntry = modEntries[add.relativePath] ?: continue
-                if (modEntry.crc == -1L || modEntry.size <= 0) continue
-
-                val match = candidateDeleted.firstOrNull { del ->
-                    !matchedDeleted.contains(del.relativePath) &&
-                    del.sizeOriginal == add.sizeModified &&
-                    srcEntries[del.relativePath]?.crc == modEntry.crc
-                }
-                if (match != null) {
-                    matchedDeleted.add(match.relativePath)
-                    matchedAdded.add(add.relativePath)
-                    movedResults.add(
-                        add.copy(
-                            status = FileStatus.MOVED,
-                            sizeOriginal = match.sizeOriginal,
-                            originalPath = match.relativePath
-                        )
-                    )
+            // Index deleted files by (CRC32, size) for O(1) matching
+            val deletedByCrcAndSize = mutableMapOf<Pair<Long, Long>, MutableList<FileCompareStatus>>()
+            for (del in candidateDeleted) {
+                val crc = srcEntries[del.relativePath]?.crc ?: -1L
+                if (crc != -1L && del.sizeOriginal > 0) {
+                    deletedByCrcAndSize.getOrPut(Pair(crc, del.sizeOriginal)) { mutableListOf() }.add(del)
                 }
             }
 
-            // Pass 2: Match by simple filename (e.g. a.xml) or same size & content
             for (add in candidateAdded) {
-                if (matchedAdded.contains(add.relativePath)) continue
-                val addSimpleName = add.relativePath.substringAfterLast('/')
                 val modEntry = modEntries[add.relativePath] ?: continue
-
-                val match = candidateDeleted.firstOrNull { del ->
-                    if (matchedDeleted.contains(del.relativePath)) return@firstOrNull false
-                    val delSimpleName = del.relativePath.substringAfterLast('/')
-                    val sameSimpleName = delSimpleName.equals(addSimpleName, ignoreCase = true)
-                    val sameSize = del.sizeOriginal == add.sizeModified && del.sizeOriginal > 0
-                    if (!sameSimpleName && !sameSize) return@firstOrNull false
-
-                    val srcEntry = srcEntries[del.relativePath] ?: return@firstOrNull false
-                    areZipEntriesContentEqual(srcZipFile, modZipFile, srcEntry, modEntry, add.isBinary, options)
-                }
-
-                if (match != null) {
-                    matchedDeleted.add(match.relativePath)
-                    matchedAdded.add(add.relativePath)
-                    movedResults.add(
-                        add.copy(
-                            status = FileStatus.MOVED,
-                            sizeOriginal = match.sizeOriginal,
-                            originalPath = match.relativePath
+                if (modEntry.crc != -1L && modEntry.size > 0) {
+                    val candidates = deletedByCrcAndSize[Pair(modEntry.crc, modEntry.size)]
+                    val match = candidates?.firstOrNull { !matchedDeleted.contains(it.relativePath) }
+                    if (match != null) {
+                        matchedDeleted.add(match.relativePath)
+                        matchedAdded.add(add.relativePath)
+                        movedResults.add(
+                            add.copy(
+                                status = FileStatus.MOVED,
+                                sizeOriginal = match.sizeOriginal,
+                                originalPath = match.relativePath
+                            )
                         )
-                    )
+                    }
                 }
             }
 
@@ -765,6 +738,9 @@ object FileHelper {
         modDir: File?,
         srcZipFile: File?,
         modZipFile: File?,
+        virtualSourceClasses: Map<String, DexClass>? = null,
+        virtualModifiedClasses: Map<String, DexClass>? = null,
+        dexOptions: DexCompareOptions = DexCompareOptions(),
         fileList: List<FileCompareStatus>,
         outputStream: OutputStream,
         onProgress: (Float, String) -> Unit
@@ -783,13 +759,24 @@ object FileHelper {
                     onProgress(progress, "Archiving ${item.relativePath}...")
 
                     val cleanPath = item.relativePath.removePrefix("/").replace('\\', '/')
-                    
-                    // If modified or deleted, add Stock version
-                    if (item.status == FileStatus.MODIFIED || item.status == FileStatus.DELETED) {
-                        if (srcZip != null) {
-                            val entry = srcZip.getEntry(cleanPath)
+                    val origCleanPath = (item.originalPath ?: cleanPath).removePrefix("/").replace('\\', '/')
+
+                    // If modified, deleted, or moved, add Stock version
+                    if (item.status == FileStatus.MODIFIED || item.status == FileStatus.DELETED || item.status == FileStatus.MOVED) {
+                        if (virtualSourceClasses != null) {
+                            val className = origCleanPath.removeSuffix(".smali").replace('/', '.')
+                            val cls = virtualSourceClasses[className]
+                            if (cls != null) {
+                                val text = cls.toTextRepresentation(dexOptions)
+                                val outEntry = ZipEntry("Stock/$origCleanPath")
+                                zipOut.putNextEntry(outEntry)
+                                zipOut.write(text.toByteArray(Charsets.UTF_8))
+                                zipOut.closeEntry()
+                            }
+                        } else if (srcZip != null) {
+                            val entry = srcZip.getEntry(origCleanPath)
                             if (entry != null) {
-                                val outEntry = ZipEntry("Stock/$cleanPath")
+                                val outEntry = ZipEntry("Stock/$origCleanPath")
                                 outEntry.time = entry.time
                                 zipOut.putNextEntry(outEntry)
                                 srcZip.getInputStream(entry).use { input ->
@@ -798,9 +785,9 @@ object FileHelper {
                                 zipOut.closeEntry()
                             }
                         } else if (srcDir != null) {
-                            val srcFile = File(srcDir, cleanPath)
+                            val srcFile = File(srcDir, origCleanPath)
                             if (srcFile.exists() && srcFile.isFile) {
-                                val entryName = "Stock/$cleanPath"
+                                val entryName = "Stock/$origCleanPath"
                                 val entry = ZipEntry(entryName)
                                 entry.time = srcFile.lastModified()
                                 zipOut.putNextEntry(entry)
@@ -812,12 +799,22 @@ object FileHelper {
                         }
                     }
 
-                    // If modified or added, add Modified version
-                    if (item.status == FileStatus.MODIFIED || item.status == FileStatus.ADDED) {
-                        if (modZip != null) {
+                    // If modified, added, or moved, add Mod version
+                    if (item.status == FileStatus.MODIFIED || item.status == FileStatus.ADDED || item.status == FileStatus.MOVED) {
+                        if (virtualModifiedClasses != null) {
+                            val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+                            val cls = virtualModifiedClasses[className]
+                            if (cls != null) {
+                                val text = cls.toTextRepresentation(dexOptions)
+                                val outEntry = ZipEntry("Mod/$cleanPath")
+                                zipOut.putNextEntry(outEntry)
+                                zipOut.write(text.toByteArray(Charsets.UTF_8))
+                                zipOut.closeEntry()
+                            }
+                        } else if (modZip != null) {
                             val entry = modZip.getEntry(cleanPath)
                             if (entry != null) {
-                                val outEntry = ZipEntry("Modified/$cleanPath")
+                                val outEntry = ZipEntry("Mod/$cleanPath")
                                 outEntry.time = entry.time
                                 zipOut.putNextEntry(outEntry)
                                 modZip.getInputStream(entry).use { input ->
@@ -828,7 +825,7 @@ object FileHelper {
                         } else if (modDir != null) {
                             val modFile = File(modDir, cleanPath)
                             if (modFile.exists() && modFile.isFile) {
-                                val entryName = "Modified/$cleanPath"
+                                val entryName = "Mod/$cleanPath"
                                 val entry = ZipEntry(entryName)
                                 entry.time = modFile.lastModified()
                                 zipOut.putNextEntry(entry)
@@ -854,20 +851,35 @@ object FileHelper {
         modDir: File?,
         srcZipFile: File?,
         modZipFile: File?,
+        virtualSourceClasses: Map<String, DexClass>? = null,
+        virtualModifiedClasses: Map<String, DexClass>? = null,
+        dexOptions: DexCompareOptions = DexCompareOptions(),
         fileStatus: FileCompareStatus,
         outputStream: OutputStream
     ): Boolean {
         val cleanPath = fileStatus.relativePath.removePrefix("/").replace('\\', '/')
+        val origCleanPath = (fileStatus.originalPath ?: cleanPath).removePrefix("/").replace('\\', '/')
+
         ZipOutputStream(BufferedOutputStream(outputStream)).use { zipOut ->
             val srcZip = if (srcZipFile?.exists() == true) ZipFile(srcZipFile) else null
             val modZip = if (modZipFile?.exists() == true) ZipFile(modZipFile) else null
 
             try {
-                if (fileStatus.status == FileStatus.MODIFIED || fileStatus.status == FileStatus.DELETED) {
-                    if (srcZip != null) {
-                        val entry = srcZip.getEntry(cleanPath)
+                if (fileStatus.status == FileStatus.MODIFIED || fileStatus.status == FileStatus.DELETED || fileStatus.status == FileStatus.MOVED) {
+                    if (virtualSourceClasses != null) {
+                        val className = origCleanPath.removeSuffix(".smali").replace('/', '.')
+                        val cls = virtualSourceClasses[className]
+                        if (cls != null) {
+                            val text = cls.toTextRepresentation(dexOptions)
+                            val outEntry = ZipEntry("Stock/$origCleanPath")
+                            zipOut.putNextEntry(outEntry)
+                            zipOut.write(text.toByteArray(Charsets.UTF_8))
+                            zipOut.closeEntry()
+                        }
+                    } else if (srcZip != null) {
+                        val entry = srcZip.getEntry(origCleanPath)
                         if (entry != null) {
-                            val outEntry = ZipEntry("Stock/$cleanPath")
+                            val outEntry = ZipEntry("Stock/$origCleanPath")
                             outEntry.time = entry.time
                             zipOut.putNextEntry(outEntry)
                             srcZip.getInputStream(entry).use { input ->
@@ -876,9 +888,9 @@ object FileHelper {
                             zipOut.closeEntry()
                         }
                     } else if (srcDir != null) {
-                        val srcFile = File(srcDir, cleanPath)
+                        val srcFile = File(srcDir, origCleanPath)
                         if (srcFile.exists() && srcFile.isFile) {
-                            val entry = ZipEntry("Stock/$cleanPath")
+                            val entry = ZipEntry("Stock/$origCleanPath")
                             entry.time = srcFile.lastModified()
                             zipOut.putNextEntry(entry)
                             srcFile.inputStream().use { input ->
@@ -888,11 +900,21 @@ object FileHelper {
                         }
                     }
                 }
-                if (fileStatus.status == FileStatus.MODIFIED || fileStatus.status == FileStatus.ADDED) {
-                    if (modZip != null) {
+                if (fileStatus.status == FileStatus.MODIFIED || fileStatus.status == FileStatus.ADDED || fileStatus.status == FileStatus.MOVED) {
+                    if (virtualModifiedClasses != null) {
+                        val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+                        val cls = virtualModifiedClasses[className]
+                        if (cls != null) {
+                            val text = cls.toTextRepresentation(dexOptions)
+                            val outEntry = ZipEntry("Mod/$cleanPath")
+                            zipOut.putNextEntry(outEntry)
+                            zipOut.write(text.toByteArray(Charsets.UTF_8))
+                            zipOut.closeEntry()
+                        }
+                    } else if (modZip != null) {
                         val entry = modZip.getEntry(cleanPath)
                         if (entry != null) {
-                            val outEntry = ZipEntry("Modified/$cleanPath")
+                            val outEntry = ZipEntry("Mod/$cleanPath")
                             outEntry.time = entry.time
                             zipOut.putNextEntry(outEntry)
                             modZip.getInputStream(entry).use { input ->
@@ -903,7 +925,7 @@ object FileHelper {
                     } else if (modDir != null) {
                         val modFile = File(modDir, cleanPath)
                         if (modFile.exists() && modFile.isFile) {
-                            val entry = ZipEntry("Modified/$cleanPath")
+                            val entry = ZipEntry("Mod/$cleanPath")
                             entry.time = modFile.lastModified()
                             zipOut.putNextEntry(entry)
                             modFile.inputStream().use { input ->

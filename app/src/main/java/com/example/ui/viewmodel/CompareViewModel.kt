@@ -1189,20 +1189,20 @@ class CompareViewModel : ViewModel() {
         sb.append("===================================================================\n")
         sb.append("Generated on: ${java.util.Date()}\n\n")
         sb.append("LEGEND:\n")
-        sb.append("  [STOCK]  : Line as it exists in the Original (Stock) file\n")
-        sb.append("  [MODIFIED]: Line as it exists in the Revised (Modified) file\n")
-        sb.append("  [-]       : Deleted line (present in Stock, removed in Modified)\n")
-        sb.append("  [+]       : Inserted line (not in Stock, added in Modified)\n")
+        sb.append("  [STOCK]    : Original line in Stock file (-)\n")
+        sb.append("  [MODIFIED] : Changed line in Modified file (+)\n")
         sb.append("===================================================================\n\n")
 
         var i = 0
         val n = diffItems.size
         val contextLines = 3
+        var hasDiffs = false
         while (i < n) {
             while (i < n && diffItems[i].type == DiffType.EQUAL) {
                 i++
             }
             if (i >= n) break
+            hasDiffs = true
 
             val hunkStart = (i - contextLines).coerceAtLeast(0)
             
@@ -1242,7 +1242,7 @@ class CompareViewModel : ViewModel() {
             if (originalStart == -1) originalStart = 1
             if (revisedStart == -1) revisedStart = 1
 
-            sb.append("--- Block starting around Stock Line $originalStart, Modified Line $revisedStart ---\n")
+            sb.append("--- Change Block (Stock L.$originalStart, Modified L.$revisedStart) ---\n")
             
             for (idx in hunkStart until finalHunkEnd) {
                 val item = diffItems[idx]
@@ -1254,40 +1254,46 @@ class CompareViewModel : ViewModel() {
                 val revLineNum = item.revisedIndex?.plus(1)?.toString() ?: ""
                 
                 if (isDelete) {
-                    sb.append(java.lang.String.format("  STOCK Line %-5s [-] : %s\n", origLineNum, item.value))
+                    sb.append(java.lang.String.format("  [STOCK    L.%-5s] [-] : %s\n", origLineNum, item.value))
                 } else if (isInsert) {
-                    sb.append(java.lang.String.format("  MODIF Line %-5s [+] : %s\n", revLineNum, item.value))
+                    sb.append(java.lang.String.format("  [MODIFIED L.%-5s] [+] : %s\n", revLineNum, item.value))
                 } else {
-                    sb.append(java.lang.String.format("        Line %-5s     : %s\n", origLineNum, item.value))
+                    val lineDisplay = if (origLineNum.isNotEmpty()) origLineNum else revLineNum
+                    sb.append(java.lang.String.format("  [         L.%-5s]     : %s\n", lineDisplay, item.value))
                 }
             }
             sb.append("\n")
             i = finalHunkEnd
+        }
+
+        if (!hasDiffs) {
+            sb.append("(Files are identical / no differences found)\n")
         }
         
         return sb.toString()
     }
 
     private suspend fun generateFullReportText(list: List<FileCompareStatus>, formatAsTxt: Boolean): String = withContext(Dispatchers.IO) {
-        val total = list.size
-        val srcTitle = _sourceFile.value?.name ?: _sourceDir.value?.name ?: "Source"
+        val total = list.size.coerceAtLeast(1)
+        val srcTitle = _sourceFile.value?.name ?: _sourceDir.value?.name ?: "Stock"
         val modTitle = _modifiedFile.value?.name ?: _modifiedDir.value?.name ?: "Modified"
+        val isVirtualDex = _activeDexVirtualPath.value != null
 
         if (!formatAsTxt) {
             val sb = java.lang.StringBuilder()
             sb.append("# CompareKit Diff Output\n")
             sb.append("# Generated on: ${java.util.Date()}\n")
-            sb.append("# Source: $srcTitle\n")
+            sb.append("# Stock: $srcTitle\n")
             sb.append("# Modified: $modTitle\n\n")
 
             var changedCount = 0
             for ((index, fileStatus) in list.withIndex()) {
                 _exportProgress.value = index.toFloat() / total
                 _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
-                delay(10)
+                delay(5)
 
                 if (fileStatus.status == FileStatus.UNCHANGED) continue
-                if (fileStatus.isBinary) {
+                if (fileStatus.isBinary && !fileStatus.relativePath.lowercase().endsWith(".smali")) {
                     sb.append("Index: ${fileStatus.relativePath}\n")
                     sb.append("Binary files $srcTitle/${fileStatus.relativePath} and $modTitle/${fileStatus.relativePath} differ\n\n")
                     changedCount++
@@ -1295,11 +1301,131 @@ class CompareViewModel : ViewModel() {
                 }
 
                 val cleanPath = fileStatus.relativePath.removePrefix("/")
-                val srcBytes = getFileBytes(isSource = true, cleanPath) ?: ByteArray(0)
+                val origCleanPath = (fileStatus.originalPath ?: fileStatus.relativePath).removePrefix("/")
+
+                val diff = if (isVirtualDex) {
+                    val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+                    val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
+                    val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
+                    val opts = _dexCompareOptions.value
+                    val srcSmali = srcCls?.toTextRepresentation(opts) ?: ""
+                    val modSmali = modCls?.toTextRepresentation(opts) ?: ""
+                    var srcLines = if (srcSmali.isNotEmpty()) srcSmali.lines() else emptyList()
+                    var modLines = if (modSmali.isNotEmpty()) modSmali.lines() else emptyList()
+                    srcLines = DexParser.preprocessSmali(srcLines, opts)
+                    modLines = DexParser.preprocessSmali(modLines, opts)
+                    if (_beautifierEnabled.value) {
+                        val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
+                        val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
+                        srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                        modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                    }
+                    MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                } else {
+                    val srcBytes = getFileBytes(isSource = true, origCleanPath) ?: ByteArray(0)
+                    val modBytes = getFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
+
+                    var srcLines = if (srcBytes.isNotEmpty()) {
+                        if (origCleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcBytes)) {
+                            AxmlDecoder.decode(srcBytes).lines()
+                        } else {
+                            String(srcBytes, Charsets.UTF_8).lines()
+                        }
+                    } else emptyList()
+
+                    var modLines = if (modBytes.isNotEmpty()) {
+                        if (cleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(modBytes)) {
+                            AxmlDecoder.decode(modBytes).lines()
+                        } else {
+                            String(modBytes, Charsets.UTF_8).lines()
+                        }
+                    } else emptyList()
+
+                    if (fileStatus.relativePath.lowercase().endsWith(".smali")) {
+                        srcLines = DexParser.preprocessSmali(srcLines, _dexCompareOptions.value)
+                        modLines = DexParser.preprocessSmali(modLines, _dexCompareOptions.value)
+                    }
+
+                    if (_beautifierEnabled.value) {
+                        val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
+                        val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
+                        srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                        modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                    }
+
+                    MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                }
+
+                val fileDiffString = formatUnifiedDiff(fileStatus.relativePath, diff)
+                if (fileDiffString.isNotBlank()) {
+                    sb.append(fileDiffString).append("\n")
+                    changedCount++
+                }
+            }
+            if (changedCount == 0) {
+                sb.append("# No differences found.\n")
+            }
+            _exportProgress.value = 1.0f
+            _exportProgressMsg.value = "Saving full diff report..."
+            delay(150)
+            return@withContext sb.toString()
+        }
+
+        val sb = java.lang.StringBuilder()
+        sb.append("===================================================================\n")
+        sb.append("COMPAREKIT ALL FILES DIFF REPORT\n")
+        sb.append("===================================================================\n")
+        sb.append("Generated on: ${java.util.Date()}\n")
+        sb.append("Stock: $srcTitle\n")
+        sb.append("Modified: $modTitle\n")
+        sb.append("===================================================================\n\n")
+
+        var changedCount = 0
+        for ((index, fileStatus) in list.withIndex()) {
+            _exportProgress.value = index.toFloat() / total
+            _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
+            delay(5)
+
+            if (fileStatus.status == FileStatus.UNCHANGED) continue
+            changedCount++
+
+            sb.append("FILE: ${fileStatus.relativePath}\n")
+            sb.append("STATUS: ${fileStatus.status}\n")
+            if (fileStatus.originalPath != null) {
+                sb.append("ORIGINAL PATH: ${fileStatus.originalPath}\n")
+            }
+            if (fileStatus.isBinary && !fileStatus.relativePath.lowercase().endsWith(".smali")) {
+                sb.append("Binary files differ.\n\n")
+                continue
+            }
+
+            val cleanPath = fileStatus.relativePath.removePrefix("/")
+            val origCleanPath = (fileStatus.originalPath ?: fileStatus.relativePath).removePrefix("/")
+
+            val diff = if (isVirtualDex) {
+                val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+                val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
+                val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
+                val opts = _dexCompareOptions.value
+                val srcSmali = srcCls?.toTextRepresentation(opts) ?: ""
+                val modSmali = modCls?.toTextRepresentation(opts) ?: ""
+                var srcLines = if (srcSmali.isNotEmpty()) srcSmali.lines() else emptyList()
+                var modLines = if (modSmali.isNotEmpty()) modSmali.lines() else emptyList()
+                srcLines = DexParser.preprocessSmali(srcLines, opts)
+                modLines = DexParser.preprocessSmali(modLines, opts)
+                if (_beautifierEnabled.value) {
+                    val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
+                    val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
+                    srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                    modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                }
+                MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+            } else {
+                val srcBytes = getFileBytes(isSource = true, origCleanPath) ?: ByteArray(0)
                 val modBytes = getFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
 
                 var srcLines = if (srcBytes.isNotEmpty()) {
-                    if (cleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcBytes)) {
+                    if (origCleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcBytes)) {
                         AxmlDecoder.decode(srcBytes).lines()
                     } else {
                         String(srcBytes, Charsets.UTF_8).lines()
@@ -1326,80 +1452,9 @@ class CompareViewModel : ViewModel() {
                     modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
                 }
 
-                val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
-                val fileDiffString = formatUnifiedDiff(fileStatus.relativePath, diff)
-                if (fileDiffString.isNotBlank()) {
-                    sb.append(fileDiffString).append("\n")
-                    changedCount++
-                }
-            }
-            if (changedCount == 0) {
-                sb.append("# No differences found.\n")
-            }
-            _exportProgress.value = 1.0f
-            _exportProgressMsg.value = "Saving full diff report..."
-            delay(150)
-            return@withContext sb.toString()
-        }
-
-        val sb = java.lang.StringBuilder()
-        sb.append("===================================================================\n")
-        sb.append("COMPAREKIT ALL FILES DIFF REPORT\n")
-        sb.append("===================================================================\n")
-        sb.append("Generated on: ${java.util.Date()}\n")
-        sb.append("Source: $srcTitle\n")
-        sb.append("Modified: $modTitle\n")
-        sb.append("===================================================================\n\n")
-
-        var changedCount = 0
-        for ((index, fileStatus) in list.withIndex()) {
-            _exportProgress.value = index.toFloat() / total
-            _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
-            delay(10)
-
-            if (fileStatus.status == FileStatus.UNCHANGED) continue
-            changedCount++
-
-            sb.append("FILE: ${fileStatus.relativePath}\n")
-            sb.append("STATUS: ${fileStatus.status}\n")
-            if (fileStatus.isBinary) {
-                sb.append("Binary files differ.\n\n")
-                continue
+                MyersDiff.diff(srcLines, modLines, _diffOptions.value)
             }
 
-            val cleanPath = fileStatus.relativePath.removePrefix("/")
-            val srcBytes = getFileBytes(isSource = true, cleanPath) ?: ByteArray(0)
-            val modBytes = getFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
-
-            var srcLines = if (srcBytes.isNotEmpty()) {
-                if (cleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcBytes)) {
-                    AxmlDecoder.decode(srcBytes).lines()
-                } else {
-                    String(srcBytes, Charsets.UTF_8).lines()
-                }
-            } else emptyList()
-
-            var modLines = if (modBytes.isNotEmpty()) {
-                if (cleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(modBytes)) {
-                    AxmlDecoder.decode(modBytes).lines()
-                } else {
-                    String(modBytes, Charsets.UTF_8).lines()
-                }
-            } else emptyList()
-
-            if (fileStatus.relativePath.lowercase().endsWith(".smali")) {
-                srcLines = DexParser.preprocessSmali(srcLines, _dexCompareOptions.value)
-                modLines = DexParser.preprocessSmali(modLines, _dexCompareOptions.value)
-            }
-
-            if (_beautifierEnabled.value) {
-                val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
-                val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
-                srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
-                modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
-            }
-
-            val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
             val fileDiffString = generateSingleFileReportText(fileStatus.relativePath, diff, formatAsTxt = true)
             if (fileDiffString.isNotBlank()) {
                 sb.append(fileDiffString).append("\n")
@@ -1460,7 +1515,8 @@ class CompareViewModel : ViewModel() {
 
     fun exportCurrentFileDiff(context: Context, formatAsTxt: Boolean, onComplete: (Boolean, String) -> Unit) {
         val selected = _selectedFile.value ?: return
-        val diffItems = _diffLines.value
+        var diffItems = _diffLines.value
+        val isVirtualDex = _activeDexVirtualPath.value != null
 
         viewModelScope.launch {
             _exportProgress.value = 0.0f
@@ -1479,6 +1535,58 @@ class CompareViewModel : ViewModel() {
 
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
+                    if (diffItems.isEmpty()) {
+                        val modCleanPath = selected.relativePath.removePrefix("/")
+                        val srcCleanPath = (selected.originalPath ?: selected.relativePath).removePrefix("/")
+                        if (isVirtualDex) {
+                            val className = modCleanPath.removeSuffix(".smali").replace('/', '.')
+                            val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
+                            val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
+                            val opts = _dexCompareOptions.value
+                            val srcSmali = srcCls?.toTextRepresentation(opts) ?: ""
+                            val modSmali = modCls?.toTextRepresentation(opts) ?: ""
+                            var srcLines = if (srcSmali.isNotEmpty()) srcSmali.lines() else emptyList()
+                            var modLines = if (modSmali.isNotEmpty()) modSmali.lines() else emptyList()
+                            srcLines = DexParser.preprocessSmali(srcLines, opts)
+                            modLines = DexParser.preprocessSmali(modLines, opts)
+                            if (_beautifierEnabled.value) {
+                                val srcFormatted = Prettier.formatAuto(selected.relativePath, srcLines.joinToString("\n"))
+                                val modFormatted = Prettier.formatAuto(selected.relativePath, modLines.joinToString("\n"))
+                                srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                                modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                            }
+                            diffItems = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                        } else {
+                            val srcBytes = getFileBytes(isSource = true, srcCleanPath) ?: ByteArray(0)
+                            val modBytes = getFileBytes(isSource = false, modCleanPath) ?: ByteArray(0)
+                            var srcLines = if (srcBytes.isNotEmpty()) {
+                                if (srcCleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcBytes)) {
+                                    AxmlDecoder.decode(srcBytes).lines()
+                                } else {
+                                    String(srcBytes, Charsets.UTF_8).lines()
+                                }
+                            } else emptyList()
+                            var modLines = if (modBytes.isNotEmpty()) {
+                                if (modCleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(modBytes)) {
+                                    AxmlDecoder.decode(modBytes).lines()
+                                } else {
+                                    String(modBytes, Charsets.UTF_8).lines()
+                                }
+                            } else emptyList()
+                            if (selected.relativePath.lowercase().endsWith(".smali")) {
+                                srcLines = DexParser.preprocessSmali(srcLines, _dexCompareOptions.value)
+                                modLines = DexParser.preprocessSmali(modLines, _dexCompareOptions.value)
+                            }
+                            if (_beautifierEnabled.value) {
+                                val srcFormatted = Prettier.formatAuto(selected.relativePath, srcLines.joinToString("\n"))
+                                val modFormatted = Prettier.formatAuto(selected.relativePath, modLines.joinToString("\n"))
+                                srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                                modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                            }
+                            diffItems = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                        }
+                    }
+
                     val reportText = generateSingleFileReportText(selected.relativePath, diffItems, formatAsTxt)
                     val ext = if (formatAsTxt) "txt" else "diff"
                     val safeFileName = selected.relativePath.replace(File.separatorChar, '_').replace(' ', '_')
@@ -1522,7 +1630,7 @@ class CompareViewModel : ViewModel() {
                 try {
                     val reportText = generateFullReportText(list, formatAsTxt)
                     context.contentResolver.openOutputStream(uri)?.use { out ->
-                        out.write(reportText.toByteArray())
+                        out.write(reportText.toByteArray(Charsets.UTF_8))
                     }
                     "Report export completed and saved to storage successfully!"
                 } catch (e: Exception) {
@@ -1539,7 +1647,8 @@ class CompareViewModel : ViewModel() {
 
     fun exportCurrentFileDiffToUri(context: Context, uri: Uri, formatAsTxt: Boolean, onComplete: (Boolean, String) -> Unit) {
         val selected = _selectedFile.value ?: return
-        val diffItems = _diffLines.value
+        var diffItems = _diffLines.value
+        val isVirtualDex = _activeDexVirtualPath.value != null
 
         viewModelScope.launch {
             _exportProgress.value = 0.0f
@@ -1558,9 +1667,61 @@ class CompareViewModel : ViewModel() {
 
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
+                    if (diffItems.isEmpty()) {
+                        val modCleanPath = selected.relativePath.removePrefix("/")
+                        val srcCleanPath = (selected.originalPath ?: selected.relativePath).removePrefix("/")
+                        if (isVirtualDex) {
+                            val className = modCleanPath.removeSuffix(".smali").replace('/', '.')
+                            val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
+                            val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
+                            val opts = _dexCompareOptions.value
+                            val srcSmali = srcCls?.toTextRepresentation(opts) ?: ""
+                            val modSmali = modCls?.toTextRepresentation(opts) ?: ""
+                            var srcLines = if (srcSmali.isNotEmpty()) srcSmali.lines() else emptyList()
+                            var modLines = if (modSmali.isNotEmpty()) modSmali.lines() else emptyList()
+                            srcLines = DexParser.preprocessSmali(srcLines, opts)
+                            modLines = DexParser.preprocessSmali(modLines, opts)
+                            if (_beautifierEnabled.value) {
+                                val srcFormatted = Prettier.formatAuto(selected.relativePath, srcLines.joinToString("\n"))
+                                val modFormatted = Prettier.formatAuto(selected.relativePath, modLines.joinToString("\n"))
+                                srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                                modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                            }
+                            diffItems = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                        } else {
+                            val srcBytes = getFileBytes(isSource = true, srcCleanPath) ?: ByteArray(0)
+                            val modBytes = getFileBytes(isSource = false, modCleanPath) ?: ByteArray(0)
+                            var srcLines = if (srcBytes.isNotEmpty()) {
+                                if (srcCleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcBytes)) {
+                                    AxmlDecoder.decode(srcBytes).lines()
+                                } else {
+                                    String(srcBytes, Charsets.UTF_8).lines()
+                                }
+                            } else emptyList()
+                            var modLines = if (modBytes.isNotEmpty()) {
+                                if (modCleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(modBytes)) {
+                                    AxmlDecoder.decode(modBytes).lines()
+                                } else {
+                                    String(modBytes, Charsets.UTF_8).lines()
+                                }
+                            } else emptyList()
+                            if (selected.relativePath.lowercase().endsWith(".smali")) {
+                                srcLines = DexParser.preprocessSmali(srcLines, _dexCompareOptions.value)
+                                modLines = DexParser.preprocessSmali(modLines, _dexCompareOptions.value)
+                            }
+                            if (_beautifierEnabled.value) {
+                                val srcFormatted = Prettier.formatAuto(selected.relativePath, srcLines.joinToString("\n"))
+                                val modFormatted = Prettier.formatAuto(selected.relativePath, modLines.joinToString("\n"))
+                                srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
+                                modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
+                            }
+                            diffItems = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                        }
+                    }
+
                     val reportText = generateSingleFileReportText(selected.relativePath, diffItems, formatAsTxt)
                     context.contentResolver.openOutputStream(uri)?.use { out ->
-                        out.write(reportText.toByteArray())
+                        out.write(reportText.toByteArray(Charsets.UTF_8))
                     }
                     "File diff export completed and saved to storage successfully!"
                 } catch (e: Exception) {
@@ -1585,9 +1746,10 @@ class CompareViewModel : ViewModel() {
         val modDir = _modifiedDir.value
         val srcZip = _sourceFile.value
         val modZip = _modifiedFile.value
+        val isVirtualDex = _activeDexVirtualPath.value != null
 
-        if (!isZip && (srcDir == null || modDir == null)) return
-        if (isZip && (srcZip == null || modZip == null)) return
+        if (!isVirtualDex && !isZip && (srcDir == null || modDir == null)) return
+        if (!isVirtualDex && isZip && (srcZip == null || modZip == null)) return
 
         val list = _fileList.value
         if (list.isEmpty()) {
@@ -1601,12 +1763,17 @@ class CompareViewModel : ViewModel() {
             _isExportMinimized.value = false
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
+                    val virtSrc = if (isVirtualDex) synchronized(virtualDexSourceClasses) { virtualDexSourceClasses.toMap() } else null
+                    val virtMod = if (isVirtualDex) synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses.toMap() } else null
                     val success = context.contentResolver.openOutputStream(uri)?.use { out ->
                         FileHelper.exportChangedFilesZip(
                             srcDir = srcDir,
                             modDir = modDir,
                             srcZipFile = if (isZip) srcZip else null,
                             modZipFile = if (isZip) modZip else null,
+                            virtualSourceClasses = virtSrc,
+                            virtualModifiedClasses = virtMod,
+                            dexOptions = _dexCompareOptions.value,
                             fileList = list,
                             outputStream = out,
                             onProgress = { progress, msg ->
@@ -1616,7 +1783,7 @@ class CompareViewModel : ViewModel() {
                         )
                     } ?: false
                     if (success) {
-                        "Changed files archive (.zip) created and saved successfully!"
+                        "Changed files archive (.zip) created with Stock/ and Mod/ folders successfully!"
                     } else {
                         "No changed files to export."
                     }
@@ -1643,9 +1810,10 @@ class CompareViewModel : ViewModel() {
         val modDir = _modifiedDir.value
         val srcZip = _sourceFile.value
         val modZip = _modifiedFile.value
+        val isVirtualDex = _activeDexVirtualPath.value != null
 
-        if (!isZip && (srcDir == null || modDir == null)) return
-        if (isZip && (srcZip == null || modZip == null)) return
+        if (!isVirtualDex && !isZip && (srcDir == null || modDir == null)) return
+        if (!isVirtualDex && isZip && (srcZip == null || modZip == null)) return
 
         viewModelScope.launch {
             _exportProgress.value = 0.0f
@@ -1653,18 +1821,23 @@ class CompareViewModel : ViewModel() {
             _isExportMinimized.value = false
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
+                    val virtSrc = if (isVirtualDex) synchronized(virtualDexSourceClasses) { virtualDexSourceClasses.toMap() } else null
+                    val virtMod = if (isVirtualDex) synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses.toMap() } else null
                     val success = context.contentResolver.openOutputStream(uri)?.use { out ->
                         FileHelper.exportSingleFileZip(
                             srcDir = srcDir,
                             modDir = modDir,
                             srcZipFile = if (isZip) srcZip else null,
                             modZipFile = if (isZip) modZip else null,
+                            virtualSourceClasses = virtSrc,
+                            virtualModifiedClasses = virtMod,
+                            dexOptions = _dexCompareOptions.value,
                             fileStatus = selected,
                             outputStream = out
                         )
                     } ?: false
                     if (success) {
-                        "File archive (.zip) created and saved successfully!"
+                        "File archive (.zip) created with Stock/ and Mod/ folders successfully!"
                     } else {
                         "Error saving zip archive."
                     }
@@ -1678,6 +1851,18 @@ class CompareViewModel : ViewModel() {
             _exportProgress.value = null
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
+    }
+
+    fun isZipExportSupported(): Boolean {
+        if (_activeDexVirtualPath.value != null) return true
+        if (_sourceIsZip.value && _modifiedIsZip.value) return true
+        val srcName = (_sourceFile.value?.name ?: _sourceDir.value?.name ?: "").lowercase()
+        val modName = (_modifiedFile.value?.name ?: _modifiedDir.value?.name ?: "").lowercase()
+        val isApk = srcName.endsWith(".apk") || modName.endsWith(".apk")
+        val isDex = srcName.endsWith(".dex") || modName.endsWith(".dex")
+        val isSmali = srcName.endsWith(".smali") || modName.endsWith(".smali")
+        val isZip = srcName.endsWith(".zip") || modName.endsWith(".zip")
+        return isApk || isDex || isSmali || isZip || (_sourceDir.value != null && _modifiedDir.value != null)
     }
 
     fun exportCustomDiffToUri(
