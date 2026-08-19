@@ -332,42 +332,36 @@ object DexParser {
         if (codeOff == 0) return ""
         return try {
             val insnsSize = buffer.readUInt(codeOff + 12)
-            if (insnsSize > 0 && codeOff + 16 + insnsSize * 2 <= bytes.size) {
-                val codeBytes = ByteArray(insnsSize * 2)
-                System.arraycopy(bytes, codeOff + 16, codeBytes, 0, codeBytes.size)
+            if (insnsSize <= 0) return ""
+            val codeStart = codeOff + 16
+            val codeEnd = codeStart + insnsSize * 2
+            if (codeEnd > bytes.size) return ""
 
-                var filtered = codeBytes
-                // 1. Ignore Nop instruction
-                if (options.ignoreNopInstruction) {
-                    val list = mutableListOf<Byte>()
-                    for (i in 0 until filtered.size step 2) {
-                        if (i + 1 < filtered.size) {
-                            val b1 = filtered[i]
-                            val b2 = filtered[i + 1]
-                            if (b1.toInt() == 0 && b2.toInt() == 0) {
-                                // It's a NOP, skip it
-                            } else {
-                                list.add(b1)
-                                list.add(b2)
-                            }
-                        }
-                    }
-                    filtered = list.toByteArray()
+            var hash = -3750763034362895579L // FNV-1a 64-bit offset basis
+            val fnvPrime = 1099511628211L
+
+            val ignoreNop = options.ignoreNopInstruction
+            val ignoreOpt = options.ignoreCompilationOptimizations
+
+            var i = codeStart
+            while (i < codeEnd) {
+                val b1 = bytes[i].toInt() and 0xFF
+                val b2 = if (i + 1 < codeEnd) bytes[i + 1].toInt() and 0xFF else 0
+
+                if (ignoreNop && b1 == 0 && b2 == 0) {
+                    i += 2
+                    continue
                 }
 
-                // 2. Ignore compilation optimizations (Opcodes-only hashing)
-                if (options.ignoreCompilationOptimizations) {
-                    val list = mutableListOf<Byte>()
-                    for (i in 0 until filtered.size step 2) {
-                        list.add(filtered[i]) // Opcode byte, ignoring registers/literals
-                    }
-                    filtered = list.toByteArray()
+                if (ignoreOpt) {
+                    hash = (hash xor b1.toLong()) * fnvPrime
+                } else {
+                    hash = (hash xor b1.toLong()) * fnvPrime
+                    hash = (hash xor b2.toLong()) * fnvPrime
                 }
-
-                md5(filtered)
-            } else {
-                ""
+                i += 2
             }
+            java.lang.Long.toHexString(hash)
         } catch (e: Exception) {
             ""
         }
@@ -1109,18 +1103,6 @@ object DexParser {
             val methodIdsSize2 = buf2.readUInt(0x58)
             val methodIdsOff2 = buf2.readUInt(0x5c)
 
-            fun resolveString(buf: DexBuffer, strOff: Int, strSize: Int, idx: Int): String {
-                if (idx !in 0 until strSize) return ""
-                val off = buf.readUInt(strOff + idx * 4)
-                return buf.readString(off)
-            }
-
-            fun resolveType(buf: DexBuffer, tOff: Int, tSize: Int, sOff: Int, sSize: Int, idx: Int): String {
-                if (idx !in 0 until tSize) return ""
-                val descriptorIdx = buf.readUInt(tOff + idx * 4)
-                return resolveString(buf, sOff, sSize, descriptorIdx)
-            }
-
             fun extractClassSignatures(
                 buf: DexBuffer,
                 rawBytes: ByteArray,
@@ -1133,6 +1115,34 @@ object DexParser {
                 mOff: Int,
                 fOff: Int
             ): Map<String, String> {
+                val strCache = arrayOfNulls<String>(sSize)
+                fun resolveString(idx: Int): String {
+                    if (idx !in 0 until sSize) return ""
+                    var s = strCache[idx]
+                    if (s == null) {
+                        s = try {
+                            val off = buf.readUInt(sOff + idx * 4)
+                            buf.readString(off)
+                        } catch (e: Exception) { "" }
+                        strCache[idx] = s
+                    }
+                    return s
+                }
+
+                val typCache = arrayOfNulls<String>(tSize)
+                fun resolveType(idx: Int): String {
+                    if (idx !in 0 until tSize) return ""
+                    var t = typCache[idx]
+                    if (t == null) {
+                        t = try {
+                            val descriptorIdx = buf.readUInt(tOff + idx * 4)
+                            resolveString(descriptorIdx)
+                        } catch (e: Exception) { "" }
+                        typCache[idx] = t
+                    }
+                    return t
+                }
+
                 val signatures = mutableMapOf<String, String>()
                 for (c in 0 until cSize) {
                     val off = cOff + c * 32
@@ -1141,10 +1151,10 @@ object DexParser {
                     val superclassIdx = buf.readUInt(off + 8)
                     val classDataOff = buf.readUInt(off + 24)
 
-                    val className = resolveType(buf, tOff, tSize, sOff, sSize, classIdx)
+                    val className = resolveType(classIdx)
                     if (className.isEmpty()) continue
 
-                    val superName = resolveType(buf, tOff, tSize, sOff, sSize, superclassIdx)
+                    val superName = resolveType(superclassIdx)
                     val sb = StringBuilder(128)
                     sb.append(className).append(';').append(superName).append(';')
 
@@ -1153,47 +1163,60 @@ object DexParser {
 
                     if (classDataOff != 0) {
                         var currOff = classDataOff
-                        val (staticFieldsSize, b1) = buf.readUleb128(currOff)
-                        currOff += b1
-                        val (instanceFieldsSize, b2) = buf.readUleb128(currOff)
-                        currOff += b2
-                        val (directMethodsSize, b3) = buf.readUleb128(currOff)
-                        currOff += b3
-                        val (virtualMethodsSize, b4) = buf.readUleb128(currOff)
-                        currOff += b4
+                        val p1 = buf.readUleb128Packed(currOff)
+                        val staticFieldsSize = (p1 and 0xFFFFFFFFL).toInt()
+                        currOff += (p1 ushr 32).toInt()
+
+                        val p2 = buf.readUleb128Packed(currOff)
+                        val instanceFieldsSize = (p2 and 0xFFFFFFFFL).toInt()
+                        currOff += (p2 ushr 32).toInt()
+
+                        val p3 = buf.readUleb128Packed(currOff)
+                        val directMethodsSize = (p3 and 0xFFFFFFFFL).toInt()
+                        currOff += (p3 ushr 32).toInt()
+
+                        val p4 = buf.readUleb128Packed(currOff)
+                        val virtualMethodsSize = (p4 and 0xFFFFFFFFL).toInt()
+                        currOff += (p4 ushr 32).toInt()
 
                         var lastFieldIdx = 0
                         val totalFields = staticFieldsSize + instanceFieldsSize
                         for (f in 0 until totalFields) {
-                            val (idxDiff, fb1) = buf.readUleb128(currOff)
-                            currOff += fb1
-                            val (flags, fb2) = buf.readUleb128(currOff)
-                            currOff += fb2
-                            lastFieldIdx += idxDiff
+                            val fp1 = buf.readUleb128Packed(currOff)
+                            lastFieldIdx += (fp1 and 0xFFFFFFFFL).toInt()
+                            currOff += (fp1 ushr 32).toInt()
+
+                            val fp2 = buf.readUleb128Packed(currOff)
+                            currOff += (fp2 ushr 32).toInt()
+
                             val fieldTypeIdx = buf.readUShort(fOff + lastFieldIdx * 8 + 2)
                             val fieldNameIdx = buf.readUInt(fOff + lastFieldIdx * 8 + 4)
-                            val fname = resolveString(buf, sOff, sSize, fieldNameIdx)
-                            val ftype = resolveType(buf, tOff, tSize, sOff, sSize, fieldTypeIdx)
+                            val fname = resolveString(fieldNameIdx)
+                            val ftype = resolveType(fieldTypeIdx)
                             sb.append("f:").append(fname).append(':').append(ftype).append(',')
                         }
 
                         var lastMethodIdx = 0
                         val totalMethods = directMethodsSize + virtualMethodsSize
                         for (m in 0 until totalMethods) {
-                            val (idxDiff, mb1) = buf.readUleb128(currOff)
-                            currOff += mb1
-                            val (flags, mb2) = buf.readUleb128(currOff)
-                            currOff += mb2
-                            val (codeOff, mb3) = buf.readUleb128(currOff)
-                            currOff += mb3
-                            lastMethodIdx += idxDiff
+                            val mp1 = buf.readUleb128Packed(currOff)
+                            lastMethodIdx += (mp1 and 0xFFFFFFFFL).toInt()
+                            currOff += (mp1 ushr 32).toInt()
+
+                            val mp2 = buf.readUleb128Packed(currOff)
+                            val flags = (mp2 and 0xFFFFFFFFL).toInt()
+                            currOff += (mp2 ushr 32).toInt()
+
+                            val mp3 = buf.readUleb128Packed(currOff)
+                            val codeOff = (mp3 and 0xFFFFFFFFL).toInt()
+                            currOff += (mp3 ushr 32).toInt()
 
                             if (options.ignoreCompilationOptimizations && ((flags and 0x1000) != 0 || (flags and 0x0040) != 0)) {
                                 continue
                             }
 
                             val methodNameIdx = buf.readUInt(mOff + lastMethodIdx * 8 + 4)
-                            val mname = resolveString(buf, sOff, sSize, methodNameIdx)
+                            val mname = resolveString(methodNameIdx)
                             val codeHash = if (codeOff != 0) computeMethodCodeHash(buf, rawBytes, codeOff, options) else ""
                             sb.append("m:").append(mname).append('=').append(codeHash).append(',')
                         }
@@ -1239,12 +1262,11 @@ object DexParser {
         onProgress: ((progress: Float) -> Unit)? = null
     ): Map<String, DexClass> {
         val result = mutableMapOf<String, DexClass>()
-        if (bytes.size < 0x70) return result // Header size minimum
+        if (bytes.size < 0x70) return result
 
         try {
             onProgress?.invoke(0.05f)
             val buffer = DexBuffer(bytes)
-            // Verify Magic "dex\n" or similar
             val magic = String(bytes, 0, 4)
             if (!magic.startsWith("dex")) {
                 return result
@@ -1263,32 +1285,33 @@ object DexParser {
             val classDefsSize = buffer.readUInt(96)
             val classDefsOff = buffer.readUInt(100)
 
-            // 1. Resolve String IDs helper
-            val stringCache = Array(stringIdsSize) { i ->
-                try {
-                    val off = buffer.readUInt(stringIdsOff + i * 4)
-                    buffer.readString(off)
-                } catch (e: Exception) {
-                    ""
-                }
-            }
+            // Lazy cached resolvers for extreme speed and low memory allocation
+            val stringCache = arrayOfNulls<String>(stringIdsSize)
             fun resolveString(idx: Int): String {
-                if (idx in 0 until stringIdsSize) return stringCache[idx]
-                return ""
+                if (idx !in 0 until stringIdsSize) return ""
+                var s = stringCache[idx]
+                if (s == null) {
+                    s = try {
+                        val off = buffer.readUInt(stringIdsOff + idx * 4)
+                        buffer.readString(off)
+                    } catch (e: Exception) { "" }
+                    stringCache[idx] = s
+                }
+                return s
             }
 
-            // 2. Resolve Type IDs helper
-            val typeCache = Array(typeIdsSize) { i ->
-                try {
-                    val descriptorIdx = buffer.readUInt(typeIdsOff + i * 4)
-                    resolveString(descriptorIdx)
-                } catch (e: Exception) {
-                    ""
-                }
-            }
+            val typeCache = arrayOfNulls<String>(typeIdsSize)
             fun resolveType(idx: Int): String {
-                if (idx in 0 until typeIdsSize) return typeCache[idx]
-                return ""
+                if (idx !in 0 until typeIdsSize) return ""
+                var t = typeCache[idx]
+                if (t == null) {
+                    t = try {
+                        val descriptorIdx = buffer.readUInt(typeIdsOff + idx * 4)
+                        resolveString(descriptorIdx)
+                    } catch (e: Exception) { "" }
+                    typeCache[idx] = t
+                }
+                return t
             }
 
             fun formatDescriptor(desc: String): String {
@@ -1323,29 +1346,45 @@ object DexParser {
                 return baseType
             }
 
-            // 3. Resolve Field name and type
-            fun resolveField(fieldIdx: Int): DexFieldData {
-                if (fieldIdx in 0 until fieldIdsSize) {
-                    val typeIdx = buffer.readUShort(fieldIdsOff + fieldIdx * 8 + 2)
-                    val nameIdx = buffer.readUInt(fieldIdsOff + fieldIdx * 8 + 4)
-                    return DexFieldData(
-                        name = resolveString(nameIdx),
-                        typeName = formatDescriptor(resolveType(typeIdx)),
-                        accessFlags = 0
-                    )
+            val formattedTypeCache = arrayOfNulls<String>(typeIdsSize)
+            fun resolveFormattedType(idx: Int): String {
+                if (idx !in 0 until typeIdsSize) return ""
+                var ft = formattedTypeCache[idx]
+                if (ft == null) {
+                    ft = formatDescriptor(resolveType(idx))
+                    formattedTypeCache[idx] = ft
                 }
-                return DexFieldData("unknown_field", "void", 0)
+                return ft
             }
 
-            // 4. Resolve Method Signature
+            val fieldCache = arrayOfNulls<DexFieldData>(fieldIdsSize)
+            fun resolveField(fieldIdx: Int): DexFieldData {
+                if (fieldIdx !in 0 until fieldIdsSize) return DexFieldData("unknown_field", "void", 0)
+                var f = fieldCache[fieldIdx]
+                if (f == null) {
+                    val typeIdx = buffer.readUShort(fieldIdsOff + fieldIdx * 8 + 2)
+                    val nameIdx = buffer.readUInt(fieldIdsOff + fieldIdx * 8 + 4)
+                    f = DexFieldData(
+                        name = resolveString(nameIdx),
+                        typeName = resolveFormattedType(typeIdx),
+                        accessFlags = 0
+                    )
+                    fieldCache[fieldIdx] = f
+                }
+                return f
+            }
+
+            val methodCache = arrayOfNulls<DexMethodData>(methodIdsSize)
             fun resolveMethod(methodIdx: Int): DexMethodData {
-                if (methodIdx in 0 until methodIdsSize) {
+                if (methodIdx !in 0 until methodIdsSize) return DexMethodData("unknown_method", "() : void", 0, "")
+                var m = methodCache[methodIdx]
+                if (m == null) {
                     val protoIdx = buffer.readUShort(methodIdsOff + methodIdx * 8 + 2)
                     val nameIdx = buffer.readUInt(methodIdsOff + methodIdx * 8 + 4)
                     val methodName = resolveString(nameIdx)
 
                     val returnTypeIdx = buffer.readUInt(protoIdsOff + protoIdx * 12 + 4)
-                    val returnType = formatDescriptor(resolveType(returnTypeIdx.toInt()))
+                    val returnType = resolveFormattedType(returnTypeIdx.toInt())
 
                     val paramsOff = buffer.readUInt(protoIdsOff + protoIdx * 12 + 8)
                     val params = mutableListOf<String>()
@@ -1353,23 +1392,26 @@ object DexParser {
                         val size = buffer.readUInt(paramsOff)
                         for (p in 0 until size) {
                             val typeIdx = buffer.readUShort(paramsOff + 4 + p * 2)
-                            params.add(formatDescriptor(resolveType(typeIdx)))
+                            params.add(resolveFormattedType(typeIdx))
                         }
                     }
                     val signature = "(${params.joinToString(", ")}) : $returnType"
-                    return DexMethodData(
+                    m = DexMethodData(
                         name = methodName,
                         signature = signature,
                         accessFlags = 0,
                         codeHash = ""
                     )
+                    methodCache[methodIdx] = m
                 }
-                return DexMethodData("unknown_method", "() : void", 0, "")
+                return m
             }
 
-            // 5. Parse Class definitions
+            val fnvPrime = 1099511628211L
+
+            // Parse Class definitions with high performance
             for (c in 0 until classDefsSize) {
-                if (onProgress != null && (c % 40 == 0 || c == classDefsSize - 1)) {
+                if (onProgress != null && (c % 200 == 0 || c == classDefsSize - 1)) {
                     val progressFraction = 0.05f + (c.toFloat() / classDefsSize.coerceAtLeast(1)) * 0.95f
                     onProgress(progressFraction)
                 }
@@ -1382,37 +1424,40 @@ object DexParser {
                     val classDataOff = buffer.readUInt(off + 24)
                     val staticValuesOff = buffer.readUInt(off + 28)
 
-                    val className = formatDescriptor(resolveType(classIdx))
+                    val className = resolveFormattedType(classIdx)
                     if (className.isEmpty()) continue
 
-                    val superClassName = formatDescriptor(resolveType(superclassIdx))
+                    val superClassName = resolveFormattedType(superclassIdx)
 
                     // Parse interfaces
-                    val interfaceNames = mutableListOf<String>()
-                    if (interfacesOff != 0) {
+                    val interfaceNames = if (interfacesOff != 0) {
                         val size = buffer.readUInt(interfacesOff)
+                        val list = ArrayList<String>(size)
                         for (i in 0 until size) {
                             val typeIdx = buffer.readUShort(interfacesOff + 4 + i * 2)
-                            interfaceNames.add(formatDescriptor(resolveType(typeIdx)))
+                            list.add(resolveFormattedType(typeIdx))
                         }
-                    }
+                        list
+                    } else emptyList()
 
                     // Parse static values if present
-                    val staticValues = mutableListOf<String>()
-                    if (staticValuesOff != 0) {
+                    val staticValues = if (staticValuesOff != 0) {
                         try {
                             var sCurr = staticValuesOff
-                            val (sSize, sRead) = buffer.readUleb128(sCurr)
-                            sCurr += sRead
+                            val p = buffer.readUleb128Packed(sCurr)
+                            val sSize = (p and 0xFFFFFFFFL).toInt()
+                            sCurr += (p ushr 32).toInt()
+                            val list = ArrayList<String>(sSize)
                             for (i in 0 until sSize) {
                                 val (valStr, bytesConsumed) = readEncodedValue(buffer, sCurr, ::resolveString, ::resolveType, ::formatDescriptor)
-                                staticValues.add(valStr)
+                                list.add(valStr)
                                 sCurr += bytesConsumed
                             }
+                            list
                         } catch (e: Exception) {
-                            // Safe fallback
+                            emptyList()
                         }
-                    }
+                    } else emptyList()
 
                     // Parse fields and methods from classDataOff
                     val fields = mutableListOf<DexFieldData>()
@@ -1420,23 +1465,33 @@ object DexParser {
 
                     if (classDataOff != 0) {
                         var currOff = classDataOff
-                        val (staticFieldsSize, bytesRead1) = buffer.readUleb128(currOff)
-                        currOff += bytesRead1
-                        val (instanceFieldsSize, bytesRead2) = buffer.readUleb128(currOff)
-                        currOff += bytesRead2
-                        val (directMethodsSize, bytesRead3) = buffer.readUleb128(currOff)
-                        currOff += bytesRead3
-                        val (virtualMethodsSize, bytesRead4) = buffer.readUleb128(currOff)
-                        currOff += bytesRead4
+                        val p1 = buffer.readUleb128Packed(currOff)
+                        val staticFieldsSize = (p1 and 0xFFFFFFFFL).toInt()
+                        currOff += (p1 ushr 32).toInt()
+
+                        val p2 = buffer.readUleb128Packed(currOff)
+                        val instanceFieldsSize = (p2 and 0xFFFFFFFFL).toInt()
+                        currOff += (p2 ushr 32).toInt()
+
+                        val p3 = buffer.readUleb128Packed(currOff)
+                        val directMethodsSize = (p3 and 0xFFFFFFFFL).toInt()
+                        currOff += (p3 ushr 32).toInt()
+
+                        val p4 = buffer.readUleb128Packed(currOff)
+                        val virtualMethodsSize = (p4 and 0xFFFFFFFFL).toInt()
+                        currOff += (p4 ushr 32).toInt()
 
                         // Static fields
                         var lastFieldIdx = 0
                         for (f in 0 until staticFieldsSize) {
-                            val (idxDiff, b1) = buffer.readUleb128(currOff)
-                            currOff += b1
-                            val (flags, b2) = buffer.readUleb128(currOff)
-                            currOff += b2
-                            lastFieldIdx += idxDiff
+                            val fp1 = buffer.readUleb128Packed(currOff)
+                            lastFieldIdx += (fp1 and 0xFFFFFFFFL).toInt()
+                            currOff += (fp1 ushr 32).toInt()
+
+                            val fp2 = buffer.readUleb128Packed(currOff)
+                            val flags = (fp2 and 0xFFFFFFFFL).toInt()
+                            currOff += (fp2 ushr 32).toInt()
+
                             val fInfo = resolveField(lastFieldIdx)
                             val initVal = if (f < staticValues.size) staticValues[f] else null
                             fields.add(fInfo.copy(accessFlags = flags, initialValue = initVal))
@@ -1445,11 +1500,14 @@ object DexParser {
                         // Instance fields
                         lastFieldIdx = 0
                         for (f in 0 until instanceFieldsSize) {
-                            val (idxDiff, b1) = buffer.readUleb128(currOff)
-                            currOff += b1
-                            val (flags, b2) = buffer.readUleb128(currOff)
-                            currOff += b2
-                            lastFieldIdx += idxDiff
+                            val fp1 = buffer.readUleb128Packed(currOff)
+                            lastFieldIdx += (fp1 and 0xFFFFFFFFL).toInt()
+                            currOff += (fp1 ushr 32).toInt()
+
+                            val fp2 = buffer.readUleb128Packed(currOff)
+                            val flags = (fp2 and 0xFFFFFFFFL).toInt()
+                            currOff += (fp2 ushr 32).toInt()
+
                             val fInfo = resolveField(lastFieldIdx)
                             fields.add(fInfo.copy(accessFlags = flags))
                         }
@@ -1457,13 +1515,17 @@ object DexParser {
                         // Direct methods
                         var lastMethodIdx = 0
                         for (m in 0 until directMethodsSize) {
-                            val (idxDiff, b1) = buffer.readUleb128(currOff)
-                            currOff += b1
-                            val (flags, b2) = buffer.readUleb128(currOff)
-                            currOff += b2
-                            val (codeOff, b3) = buffer.readUleb128(currOff)
-                            currOff += b3
-                            lastMethodIdx += idxDiff
+                            val mp1 = buffer.readUleb128Packed(currOff)
+                            lastMethodIdx += (mp1 and 0xFFFFFFFFL).toInt()
+                            currOff += (mp1 ushr 32).toInt()
+
+                            val mp2 = buffer.readUleb128Packed(currOff)
+                            val flags = (mp2 and 0xFFFFFFFFL).toInt()
+                            currOff += (mp2 ushr 32).toInt()
+
+                            val mp3 = buffer.readUleb128Packed(currOff)
+                            val codeOff = (mp3 and 0xFFFFFFFFL).toInt()
+                            currOff += (mp3 ushr 32).toInt()
 
                             val regCount = if (codeOff != 0) buffer.readUShort(codeOff) else 0
                             val methodCodeHash = if (codeOff != 0) {
@@ -1485,13 +1547,17 @@ object DexParser {
                         // Virtual methods
                         lastMethodIdx = 0
                         for (m in 0 until virtualMethodsSize) {
-                            val (idxDiff, b1) = buffer.readUleb128(currOff)
-                            currOff += b1
-                            val (flags, b2) = buffer.readUleb128(currOff)
-                            currOff += b2
-                            val (codeOff, b3) = buffer.readUleb128(currOff)
-                            currOff += b3
-                            lastMethodIdx += idxDiff
+                            val mp1 = buffer.readUleb128Packed(currOff)
+                            lastMethodIdx += (mp1 and 0xFFFFFFFFL).toInt()
+                            currOff += (mp1 ushr 32).toInt()
+
+                            val mp2 = buffer.readUleb128Packed(currOff)
+                            val flags = (mp2 and 0xFFFFFFFFL).toInt()
+                            currOff += (mp2 ushr 32).toInt()
+
+                            val mp3 = buffer.readUleb128Packed(currOff)
+                            val codeOff = (mp3 and 0xFFFFFFFFL).toInt()
+                            currOff += (mp3 ushr 32).toInt()
 
                             val regCount = if (codeOff != 0) buffer.readUShort(codeOff) else 0
                             val methodCodeHash = if (codeOff != 0) {
@@ -1511,26 +1577,44 @@ object DexParser {
                         }
                     }
 
-                    // Fast deterministic signature computation
-                    val sigSb = StringBuilder()
-                    sigSb.append(className).append(';').append(superClassName).append(';').append(accessFlags).append(';')
-                    for (iface in interfaceNames) sigSb.append(iface).append(';')
+                    // Zero-allocation FNV-1a fast 64-bit class signature computation
+                    var classHash = -3750763034362895579L
+                    fun hashString(s: String) {
+                        for (ch in s) {
+                            classHash = (classHash xor ch.code.toLong()) * fnvPrime
+                        }
+                        classHash = (classHash xor ';'.code.toLong()) * fnvPrime
+                    }
+
+                    hashString(className)
+                    hashString(superClassName)
+                    classHash = (classHash xor accessFlags.toLong()) * fnvPrime
+
+                    for (iface in interfaceNames) {
+                        hashString(iface)
+                    }
+
                     for (f in fields) {
                         val shouldOmitInitValue = options.ignoreCompilationOptimizations && isDefaultValue(f.typeName, f.initialValue)
-                        sigSb.append(f.name).append(':').append(f.typeName).append(':').append(f.accessFlags)
+                        hashString(f.name)
+                        hashString(f.typeName)
+                        classHash = (classHash xor f.accessFlags.toLong()) * fnvPrime
                         if (f.initialValue != null && !shouldOmitInitValue && !options.ignoreFieldInitialValues) {
-                            sigSb.append('=').append(f.initialValue)
+                            hashString(f.initialValue)
                         }
-                        sigSb.append(';')
                     }
+
                     for (m in methods) {
-                        sigSb.append(m.name).append(':').append(m.signature).append(':').append(m.accessFlags)
+                        hashString(m.name)
+                        hashString(m.signature)
+                        classHash = (classHash xor m.accessFlags.toLong()) * fnvPrime
                         if (!options.ignoreRegisterCount) {
-                            sigSb.append(':').append(m.registersCount)
+                            classHash = (classHash xor m.registersCount.toLong()) * fnvPrime
                         }
-                        sigSb.append('#').append(m.codeHash).append(';')
+                        hashString(m.codeHash)
                     }
-                    val signature = md5(sigSb.toString())
+
+                    val signature = java.lang.Long.toHexString(classHash)
 
                     val dexClass = DexClass(
                         name = className,
@@ -1571,21 +1655,33 @@ object DexParser {
             val methodIdsSize = buffer.readUInt(88)
             val methodIdsOff = buffer.readUInt(92)
 
-            val stringCache = Array(stringIdsSize) { i ->
-                try {
-                    val off = buffer.readUInt(stringIdsOff + i * 4)
-                    buffer.readString(off)
-                } catch (e: Exception) { "" }
+            val stringCache = arrayOfNulls<String>(stringIdsSize)
+            fun resolveString(idx: Int): String {
+                if (idx !in 0 until stringIdsSize) return ""
+                var s = stringCache[idx]
+                if (s == null) {
+                    s = try {
+                        val off = buffer.readUInt(stringIdsOff + idx * 4)
+                        buffer.readString(off)
+                    } catch (e: Exception) { "" }
+                    stringCache[idx] = s
+                }
+                return s
             }
-            fun resolveString(idx: Int): String = if (idx in 0 until stringIdsSize) stringCache[idx] else ""
 
-            val typeCache = Array(typeIdsSize) { i ->
-                try {
-                    val descriptorIdx = buffer.readUInt(typeIdsOff + i * 4)
-                    resolveString(descriptorIdx)
-                } catch (e: Exception) { "" }
+            val typeCache = arrayOfNulls<String>(typeIdsSize)
+            fun resolveType(idx: Int): String {
+                if (idx !in 0 until typeIdsSize) return ""
+                var t = typeCache[idx]
+                if (t == null) {
+                    t = try {
+                        val descriptorIdx = buffer.readUInt(typeIdsOff + idx * 4)
+                        resolveString(descriptorIdx)
+                    } catch (e: Exception) { "" }
+                    typeCache[idx] = t
+                }
+                return t
             }
-            fun resolveType(idx: Int): String = if (idx in 0 until typeIdsSize) typeCache[idx] else ""
 
             fun formatDescriptor(desc: String): String {
                 if (desc.isEmpty()) return ""
@@ -1695,7 +1791,8 @@ class DexBuffer(private val bytes: ByteArray) {
         var curr = offset
         var len = 0
         var shift = 0
-        while (true) {
+        val size = bytes.size
+        while (curr < size) {
             val b = bytes[curr].toInt() and 0xFF
             curr++
             len = len or ((b and 0x7F) shl shift)
@@ -1703,25 +1800,32 @@ class DexBuffer(private val bytes: ByteArray) {
             shift += 7
         }
         val start = curr
-        while (curr < bytes.size && bytes[curr] != 0.toByte()) {
+        while (curr < size && bytes[curr] != 0.toByte()) {
             curr++
         }
-        return String(bytes, start, curr - start, Charsets.UTF_8)
+        val byteLen = curr - start
+        if (byteLen <= 0) return ""
+        return String(bytes, start, byteLen, Charsets.UTF_8)
     }
 
-    fun readUleb128(offset: Int): Pair<Int, Int> {
+    fun readUleb128Packed(offset: Int): Long {
         var result = 0
         var shift = 0
         var index = offset
-        while (index < bytes.size) {
+        val size = bytes.size
+        while (index < size) {
             val b = bytes[index].toInt() and 0xFF
             index++
             result = result or ((b and 0x7F) shl shift)
-            if ((b and 0x80) == 0) {
-                break
-            }
+            if ((b and 0x80) == 0) break
             shift += 7
         }
-        return Pair(result, index - offset)
+        val bytesRead = index - offset
+        return (result.toLong() and 0xFFFFFFFFL) or (bytesRead.toLong() shl 32)
+    }
+
+    fun readUleb128(offset: Int): Pair<Int, Int> {
+        val packed = readUleb128Packed(offset)
+        return Pair((packed and 0xFFFFFFFFL).toInt(), (packed ushr 32).toInt())
     }
 }

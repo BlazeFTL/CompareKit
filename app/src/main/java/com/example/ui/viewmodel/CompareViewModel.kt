@@ -26,6 +26,8 @@ import com.example.file.ArscParser
 import com.example.file.AxmlDecoder
 import com.example.ui.theme.AppTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -220,19 +222,24 @@ class CompareViewModel : ViewModel() {
 
                     val opts = _dexCompareOptions.value
                     
-                    // Parse Source DEX (0.05 -> 0.45)
-                    val srcClasses = if (srcBytes.isNotEmpty()) {
-                        DexParser.parse(srcBytes, opts) { p ->
-                            _compareProgress.value = 0.05f + p * 0.40f
+                    // Parse Source and Modified DEX in parallel (0.05 -> 0.85)
+                    val (srcClasses, modClasses) = coroutineScope {
+                        val srcDeferred = async(Dispatchers.Default) {
+                            if (srcBytes.isNotEmpty()) {
+                                DexParser.parse(srcBytes, opts) { p ->
+                                    _compareProgress.value = 0.05f + p * 0.40f
+                                }
+                            } else emptyMap()
                         }
-                    } else emptyMap()
-
-                    // Parse Modified DEX (0.45 -> 0.85)
-                    val modClasses = if (modBytes.isNotEmpty()) {
-                        DexParser.parse(modBytes, opts) { p ->
-                            _compareProgress.value = 0.45f + p * 0.40f
+                        val modDeferred = async(Dispatchers.Default) {
+                            if (modBytes.isNotEmpty()) {
+                                DexParser.parse(modBytes, opts) { p ->
+                                    _compareProgress.value = 0.45f + p * 0.40f
+                                }
+                            } else emptyMap()
                         }
-                    } else emptyMap()
+                        Pair(srcDeferred.await(), modDeferred.await())
+                    }
 
                     synchronized(virtualDexSourceClasses) {
                         virtualDexSourceClasses.clear()
@@ -1037,8 +1044,15 @@ class CompareViewModel : ViewModel() {
 
                     if (fileStatus.relativePath.lowercase().endsWith(".dex")) {
                         val opts = _dexCompareOptions.value
-                        val srcClasses = if (srcBytes.isNotEmpty()) DexParser.parse(srcBytes, opts) else emptyMap()
-                        val modClasses = if (modBytes.isNotEmpty()) DexParser.parse(modBytes, opts) else emptyMap()
+                        val (srcClasses, modClasses) = coroutineScope {
+                            val srcDeferred = async(Dispatchers.Default) {
+                                if (srcBytes.isNotEmpty()) DexParser.parse(srcBytes, opts) else emptyMap()
+                            }
+                            val modDeferred = async(Dispatchers.Default) {
+                                if (modBytes.isNotEmpty()) DexParser.parse(modBytes, opts) else emptyMap()
+                            }
+                            Pair(srcDeferred.await(), modDeferred.await())
+                        }
 
                         val allClassNames = (srcClasses.keys + modClasses.keys).sorted()
                         val compareStatusList = allClassNames.map { className ->
