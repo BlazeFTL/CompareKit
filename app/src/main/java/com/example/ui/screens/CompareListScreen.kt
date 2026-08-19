@@ -1062,11 +1062,11 @@ fun CompareListScreen(
                                 }
                             }
 
-                            // Filter Pills Carousel (Matching Screenshot 1)
+                            // Filter Pills Carousel (Only Modified, Added, Deleted, and Moved)
                             val modifiedCount = remember(fileList) { fileList.count { it.status == FileStatus.MODIFIED } }
                             val addedCount = remember(fileList) { fileList.count { it.status == FileStatus.ADDED } }
                             val deletedCount = remember(fileList) { fileList.count { it.status == FileStatus.DELETED } }
-                            val unchangedCount = remember(fileList) { fileList.count { it.status == FileStatus.UNCHANGED } }
+                            val movedCount = remember(fileList) { fileList.count { it.status == FileStatus.MOVED } }
 
                             Row(
                                 modifier = Modifier
@@ -1082,65 +1082,42 @@ fun CompareListScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (activeDexVirtualPath != null) {
-                                        // DEX bytecode mode: Only show Modified, Added, and Deleted filter tabs
+                                    FilterChipPill(
+                                        label = "Modified",
+                                        count = modifiedCount,
+                                        isSelected = statusFilter == FileStatus.MODIFIED,
+                                        onClick = {
+                                            if (statusFilter == FileStatus.MODIFIED) viewModel.updateStatusFilter(null)
+                                            else viewModel.updateStatusFilter(FileStatus.MODIFIED)
+                                        }
+                                    )
+                                    FilterChipPill(
+                                        label = "Added",
+                                        count = addedCount,
+                                        isSelected = statusFilter == FileStatus.ADDED,
+                                        onClick = {
+                                            if (statusFilter == FileStatus.ADDED) viewModel.updateStatusFilter(null)
+                                            else viewModel.updateStatusFilter(FileStatus.ADDED)
+                                        }
+                                    )
+                                    FilterChipPill(
+                                        label = "Deleted",
+                                        count = deletedCount,
+                                        isSelected = statusFilter == FileStatus.DELETED,
+                                        onClick = {
+                                            if (statusFilter == FileStatus.DELETED) viewModel.updateStatusFilter(null)
+                                            else viewModel.updateStatusFilter(FileStatus.DELETED)
+                                        }
+                                    )
+                                    if (activeDexVirtualPath == null) {
                                         FilterChipPill(
-                                            label = "Modified",
-                                            count = modifiedCount,
-                                            isSelected = statusFilter == FileStatus.MODIFIED,
+                                            label = "Moved",
+                                            count = movedCount,
+                                            isSelected = statusFilter == FileStatus.MOVED,
                                             onClick = {
-                                                if (statusFilter == FileStatus.MODIFIED) viewModel.updateStatusFilter(null)
-                                                else viewModel.updateStatusFilter(FileStatus.MODIFIED)
+                                                if (statusFilter == FileStatus.MOVED) viewModel.updateStatusFilter(null)
+                                                else viewModel.updateStatusFilter(FileStatus.MOVED)
                                             }
-                                        )
-                                        FilterChipPill(
-                                            label = "Added",
-                                            count = addedCount,
-                                            isSelected = statusFilter == FileStatus.ADDED,
-                                            onClick = {
-                                                if (statusFilter == FileStatus.ADDED) viewModel.updateStatusFilter(null)
-                                                else viewModel.updateStatusFilter(FileStatus.ADDED)
-                                            }
-                                        )
-                                        FilterChipPill(
-                                            label = "Deleted",
-                                            count = deletedCount,
-                                            isSelected = statusFilter == FileStatus.DELETED,
-                                            onClick = {
-                                                if (statusFilter == FileStatus.DELETED) viewModel.updateStatusFilter(null)
-                                                else viewModel.updateStatusFilter(FileStatus.DELETED)
-                                            }
-                                        )
-                                    } else {
-                                        FilterChipPill(
-                                            label = "All Files",
-                                            count = fileList.size,
-                                            isSelected = statusFilter == null,
-                                            onClick = { viewModel.updateStatusFilter(null) }
-                                        )
-                                        FilterChipPill(
-                                            label = "Modified",
-                                            count = modifiedCount,
-                                            isSelected = statusFilter == FileStatus.MODIFIED,
-                                            onClick = { viewModel.updateStatusFilter(FileStatus.MODIFIED) }
-                                        )
-                                        FilterChipPill(
-                                            label = "Added",
-                                            count = addedCount,
-                                            isSelected = statusFilter == FileStatus.ADDED,
-                                            onClick = { viewModel.updateStatusFilter(FileStatus.ADDED) }
-                                        )
-                                        FilterChipPill(
-                                            label = "Deleted",
-                                            count = deletedCount,
-                                            isSelected = statusFilter == FileStatus.DELETED,
-                                            onClick = { viewModel.updateStatusFilter(FileStatus.DELETED) }
-                                        )
-                                        FilterChipPill(
-                                            label = "Unchanged",
-                                            count = unchangedCount,
-                                            isSelected = statusFilter == FileStatus.UNCHANGED,
-                                            onClick = { viewModel.updateStatusFilter(FileStatus.UNCHANGED) }
                                         )
                                     }
                                 }
@@ -1405,7 +1382,11 @@ fun CompareListScreen(
                                     if (isNonComparable) return@filter false
 
                                     val matchQuery = file.relativePath.contains(searchQuery, ignoreCase = true)
-                                    val matchStatus = statusFilter == null || file.status == statusFilter
+                                    val matchStatus = if (statusFilter == null) {
+                                        file.status != FileStatus.UNCHANGED
+                                    } else {
+                                        file.status == statusFilter
+                                    }
                                     val isIgnored = ignorePatterns.any { pattern ->
                                         file.relativePath.lowercase().contains(pattern)
                                     }
@@ -1508,6 +1489,7 @@ fun CompareListScreen(
                                                 FileStatus.ADDED -> Color(0xFF10B981)
                                                 FileStatus.DELETED -> Color(0xFFEF4444)
                                                 FileStatus.MODIFIED -> Color(0xFFF59E0B)
+                                                FileStatus.MOVED -> Color(0xFF8B5CF6)
                                                 FileStatus.UNCHANGED -> null
                                             }
                                         }
@@ -2001,7 +1983,18 @@ fun ModernFileCompareCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (directoryPath.isNotEmpty()) {
+                    if (item.status == FileStatus.MOVED && item.originalPath != null) {
+                        Text(
+                            text = "Moved from: ${item.originalPath}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF8B5CF6),
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else if (directoryPath.isNotEmpty()) {
                         Text(
                             text = directoryPath,
                             style = MaterialTheme.typography.labelSmall,
@@ -2018,7 +2011,7 @@ fun ModernFileCompareCard(
             }
 
             // MIDDLE SECTION: Visual Diff Distribution Bar (Only shown for modified non-dex, added, or deleted files)
-            if (item.status != FileStatus.UNCHANGED && !isDexFile) {
+            if (item.status != FileStatus.UNCHANGED && item.status != FileStatus.MOVED && !isDexFile) {
                 Spacer(modifier = Modifier.height(10.dp))
                 DiffDistributionBar(
                     addedPct = stats.addedPct,
@@ -2050,6 +2043,14 @@ fun ModernFileCompareCard(
                                 text = formatSize(item.sizeOriginal),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        FileStatus.MOVED -> {
+                            Text(
+                                text = formatSize(item.sizeModified),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF8B5CF6)
                             )
                         }
                         FileStatus.MODIFIED -> {
@@ -2285,6 +2286,7 @@ fun ModernStatusBadge(status: FileStatus) {
         FileStatus.MODIFIED -> Triple("MODIFIED", Color(0xFFF59E0B).copy(alpha = 0.15f), Color(0xFFD97706))
         FileStatus.ADDED -> Triple("ADDED", Color(0xFF10B981).copy(alpha = 0.15f), Color(0xFF059669))
         FileStatus.DELETED -> Triple("DELETED", Color(0xFFEF4444).copy(alpha = 0.15f), Color(0xFFDC2626))
+        FileStatus.MOVED -> Triple("MOVED", Color(0xFF8B5CF6).copy(alpha = 0.15f), Color(0xFF7C3AED))
     }
 
     Surface(
@@ -2356,6 +2358,7 @@ private fun computeFileDiffStats(item: FileCompareStatus): DiffStats {
         FileStatus.ADDED -> DiffStats(addedPct = 100, deletedPct = 0, unchangedPct = 0)
         FileStatus.DELETED -> DiffStats(addedPct = 0, deletedPct = 100, unchangedPct = 0)
         FileStatus.UNCHANGED -> DiffStats(addedPct = 0, deletedPct = 0, unchangedPct = 100)
+        FileStatus.MOVED -> DiffStats(addedPct = 0, deletedPct = 0, unchangedPct = 100)
         FileStatus.MODIFIED -> {
             val delta = item.sizeModified - item.sizeOriginal
             if (delta > 0) {
@@ -2374,6 +2377,7 @@ private fun getStatusColor(status: FileStatus): Color {
         FileStatus.ADDED -> Color(0xFF10B981)
         FileStatus.DELETED -> Color(0xFFEF4444)
         FileStatus.MODIFIED -> Color(0xFFF59E0B)
+        FileStatus.MOVED -> Color(0xFF8B5CF6)
         FileStatus.UNCHANGED -> Color(0xFF64748B)
     }
 }

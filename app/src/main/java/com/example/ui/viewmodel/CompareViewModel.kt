@@ -198,10 +198,15 @@ class CompareViewModel : ViewModel() {
     fun openDexVirtualComparison(dexRelativePath: String) {
         viewModelScope.launch {
             _isProcessing.value = true
-            _compareProgress.value = 0f
+            _compareProgress.value = 0.05f
+            val cleanPath = dexRelativePath.removePrefix("/").replace('\\', '/')
+            if (_activeDexVirtualPath.value == null) {
+                parentComparisonFileList = _fileList.value
+            }
+            _activeDexVirtualPath.value = if (cleanPath.isNotEmpty()) cleanPath else "classes.dex"
+
             withContext(Dispatchers.IO) {
                 try {
-                    val cleanPath = dexRelativePath.removePrefix("/").replace('\\', '/')
                     val srcBytes = if (cleanPath.isNotEmpty()) {
                         getRawFileBytes(isSource = true, cleanPath) ?: ByteArray(0)
                     } else {
@@ -214,8 +219,20 @@ class CompareViewModel : ViewModel() {
                     }
 
                     val opts = _dexCompareOptions.value
-                    val srcClasses = if (srcBytes.isNotEmpty()) DexParser.parse(srcBytes, opts) else emptyMap()
-                    val modClasses = if (modBytes.isNotEmpty()) DexParser.parse(modBytes, opts) else emptyMap()
+                    
+                    // Parse Source DEX (0.05 -> 0.45)
+                    val srcClasses = if (srcBytes.isNotEmpty()) {
+                        DexParser.parse(srcBytes, opts) { p ->
+                            _compareProgress.value = 0.05f + p * 0.40f
+                        }
+                    } else emptyMap()
+
+                    // Parse Modified DEX (0.45 -> 0.85)
+                    val modClasses = if (modBytes.isNotEmpty()) {
+                        DexParser.parse(modBytes, opts) { p ->
+                            _compareProgress.value = 0.45f + p * 0.40f
+                        }
+                    } else emptyMap()
 
                     synchronized(virtualDexSourceClasses) {
                         virtualDexSourceClasses.clear()
@@ -226,14 +243,15 @@ class CompareViewModel : ViewModel() {
                         virtualDexModifiedClasses.putAll(modClasses)
                     }
 
-                    if (_activeDexVirtualPath.value == null) {
-                        parentComparisonFileList = _fileList.value
-                    }
-                    _activeDexVirtualPath.value = dexRelativePath.ifEmpty { "classes.dex" }
-
                     val allClassNames = (srcClasses.keys + modClasses.keys).sorted()
+                    val totalClasses = allClassNames.size.coerceAtLeast(1)
                     val virtualSmaliList = mutableListOf<FileCompareStatus>()
-                    for (className in allClassNames) {
+
+                    for ((idx, className) in allClassNames.withIndex()) {
+                        if (idx % 100 == 0 || idx == allClassNames.size - 1) {
+                            _compareProgress.value = 0.85f + (idx.toFloat() / totalClasses) * 0.15f
+                        }
+
                         val srcCls = srcClasses[className]
                         val modCls = modClasses[className]
 
@@ -271,6 +289,7 @@ class CompareViewModel : ViewModel() {
                     _fileList.value = virtualSmaliList
                     _searchQuery.value = ""
                     _statusFilter.value = null
+                    _compareProgress.value = 1.0f
                 } catch (e: Exception) {
                     _errorMessage.value = "Failed to parse DEX bytecode: ${e.localizedMessage}"
                 } finally {
@@ -979,10 +998,11 @@ class CompareViewModel : ViewModel() {
             _dexClassesList.value = emptyList()
             withContext(Dispatchers.IO) {
                 try {
-                    val cleanPath = fileStatus.relativePath.removePrefix("/")
+                    val modCleanPath = fileStatus.relativePath.removePrefix("/")
+                    val srcCleanPath = (fileStatus.originalPath ?: fileStatus.relativePath).removePrefix("/")
 
                     if (_activeDexVirtualPath.value != null) {
-                        val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+                        val className = modCleanPath.removeSuffix(".smali").replace('/', '.')
                         val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
                         val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
 
@@ -1008,8 +1028,8 @@ class CompareViewModel : ViewModel() {
                         return@withContext
                     }
 
-                    val srcBytes = getFileBytes(isSource = true, cleanPath) ?: ByteArray(0)
-                    val modBytes = getFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
+                    val srcBytes = getFileBytes(isSource = true, srcCleanPath) ?: ByteArray(0)
+                    val modBytes = getFileBytes(isSource = false, modCleanPath) ?: ByteArray(0)
 
                     if (fileStatus.relativePath.lowercase().endsWith(".dex")) {
                         val opts = _dexCompareOptions.value

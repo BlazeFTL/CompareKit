@@ -23,7 +23,7 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 enum class FileStatus {
-    UNCHANGED, MODIFIED, ADDED, DELETED
+    UNCHANGED, MODIFIED, ADDED, DELETED, MOVED
 }
 
 data class FileCompareStatus(
@@ -31,7 +31,8 @@ data class FileCompareStatus(
     val status: FileStatus,
     val sizeOriginal: Long = 0,
     val sizeModified: Long = 0,
-    val isBinary: Boolean = false
+    val isBinary: Boolean = false,
+    val originalPath: String? = null
 )
 
 object FileHelper {
@@ -226,7 +227,7 @@ object FileHelper {
         val srcZip = try { ZipFile(srcZipFile) } catch (e: Exception) { null }
         val modZip = try { ZipFile(modZipFile) } catch (e: Exception) { null }
 
-        try {
+        val rawResults: List<FileCompareStatus> = try {
             allPaths.map { path ->
                 async(Dispatchers.IO) {
                     semaphore.withPermit {
@@ -322,6 +323,107 @@ object FileHelper {
             srcZip?.close()
             modZip?.close()
         }
+
+        // Post-processing for detecting Moved / Renamed files (e.g. res/values/a.xml -> asset/a.xml)
+        val unchangedAndModified = rawResults.filter { it.status == FileStatus.UNCHANGED || it.status == FileStatus.MODIFIED }
+        val candidateDeleted = rawResults.filter { it.status == FileStatus.DELETED }
+        val candidateAdded = rawResults.filter { it.status == FileStatus.ADDED }
+
+        if (candidateDeleted.isNotEmpty() && candidateAdded.isNotEmpty()) {
+            val movedResults = mutableListOf<FileCompareStatus>()
+            val matchedAdded = mutableSetOf<String>()
+            val matchedDeleted = mutableSetOf<String>()
+
+            // Pass 1: Match by CRC & size
+            for (add in candidateAdded) {
+                val modEntry = modEntries[add.relativePath] ?: continue
+                if (modEntry.crc == -1L || modEntry.size <= 0) continue
+
+                val match = candidateDeleted.firstOrNull { del ->
+                    !matchedDeleted.contains(del.relativePath) &&
+                    del.sizeOriginal == add.sizeModified &&
+                    srcEntries[del.relativePath]?.crc == modEntry.crc
+                }
+                if (match != null) {
+                    matchedDeleted.add(match.relativePath)
+                    matchedAdded.add(add.relativePath)
+                    movedResults.add(
+                        add.copy(
+                            status = FileStatus.MOVED,
+                            sizeOriginal = match.sizeOriginal,
+                            originalPath = match.relativePath
+                        )
+                    )
+                }
+            }
+
+            // Pass 2: Match by simple filename (e.g. a.xml) or same size & content
+            for (add in candidateAdded) {
+                if (matchedAdded.contains(add.relativePath)) continue
+                val addSimpleName = add.relativePath.substringAfterLast('/')
+                val modEntry = modEntries[add.relativePath] ?: continue
+
+                val match = candidateDeleted.firstOrNull { del ->
+                    if (matchedDeleted.contains(del.relativePath)) return@firstOrNull false
+                    val delSimpleName = del.relativePath.substringAfterLast('/')
+                    val sameSimpleName = delSimpleName.equals(addSimpleName, ignoreCase = true)
+                    val sameSize = del.sizeOriginal == add.sizeModified && del.sizeOriginal > 0
+                    if (!sameSimpleName && !sameSize) return@firstOrNull false
+
+                    val srcEntry = srcEntries[del.relativePath] ?: return@firstOrNull false
+                    areZipEntriesContentEqual(srcZipFile, modZipFile, srcEntry, modEntry, add.isBinary, options)
+                }
+
+                if (match != null) {
+                    matchedDeleted.add(match.relativePath)
+                    matchedAdded.add(add.relativePath)
+                    movedResults.add(
+                        add.copy(
+                            status = FileStatus.MOVED,
+                            sizeOriginal = match.sizeOriginal,
+                            originalPath = match.relativePath
+                        )
+                    )
+                }
+            }
+
+            val remainingDeleted = candidateDeleted.filter { !matchedDeleted.contains(it.relativePath) }
+            val remainingAdded = candidateAdded.filter { !matchedAdded.contains(it.relativePath) }
+
+            return@coroutineScope (unchangedAndModified + movedResults + remainingDeleted + remainingAdded)
+                .sortedBy { it.relativePath.lowercase() }
+        }
+
+        return@coroutineScope rawResults.sortedBy { it.relativePath.lowercase() }
+    }
+
+    private fun areZipEntriesContentEqual(
+        srcZipFile: File,
+        modZipFile: File,
+        srcEntry: ZipEntry,
+        modEntry: ZipEntry,
+        isBinary: Boolean,
+        options: DiffOptions
+    ): Boolean {
+        if (srcEntry.crc != -1L && modEntry.crc != -1L && srcEntry.crc == modEntry.crc && srcEntry.size == modEntry.size) {
+            return true
+        }
+        return try {
+            val srcBytes = getZipEntryBytes(srcZipFile, srcEntry.name) ?: return false
+            val modBytes = getZipEntryBytes(modZipFile, modEntry.name) ?: return false
+            if (srcBytes.contentEquals(modBytes)) return true
+            if (!isBinary) {
+                val srcText = if (srcEntry.name.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcBytes)) {
+                    AxmlDecoder.decode(srcBytes)
+                } else String(srcBytes, Charsets.UTF_8)
+                val modText = if (modEntry.name.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(modBytes)) {
+                    AxmlDecoder.decode(modBytes)
+                } else String(modBytes, Charsets.UTF_8)
+                areContentsEqual(srcText.lines(), modText.lines(), options)
+            } else false
+        } catch (e: Exception) {
+            false
+        }
     }
 
     suspend fun compareDirectories(
@@ -345,7 +447,7 @@ object FileHelper {
         val semaphore = Semaphore(64)
         val lastProgressUpdate = AtomicLong(0)
         
-        allPaths.map { path ->
+        val rawResults = allPaths.map { path ->
             async(Dispatchers.IO) {
                 semaphore.withPermit {
                     val srcFile = File(sourceDir, path)
@@ -428,6 +530,80 @@ object FileHelper {
                 }
             }
         }.awaitAll()
+
+        val unchangedAndModified = rawResults.filter { it.status == FileStatus.UNCHANGED || it.status == FileStatus.MODIFIED }
+        val candidateDeleted = rawResults.filter { it.status == FileStatus.DELETED }
+        val candidateAdded = rawResults.filter { it.status == FileStatus.ADDED }
+
+        if (candidateDeleted.isNotEmpty() && candidateAdded.isNotEmpty()) {
+            val movedResults = mutableListOf<FileCompareStatus>()
+            val matchedAdded = mutableSetOf<String>()
+            val matchedDeleted = mutableSetOf<String>()
+
+            for (add in candidateAdded) {
+                val addSimpleName = add.relativePath.substringAfterLast('/')
+                val modFile = File(modifiedDir, add.relativePath)
+
+                val match = candidateDeleted.firstOrNull { del ->
+                    if (matchedDeleted.contains(del.relativePath)) return@firstOrNull false
+                    val delSimpleName = del.relativePath.substringAfterLast('/')
+                    val srcFile = File(sourceDir, del.relativePath)
+
+                    if (delSimpleName.equals(addSimpleName, ignoreCase = true)) {
+                        areFilesContentEqual(srcFile, modFile, add.isBinary, options)
+                    } else if (del.sizeOriginal == add.sizeModified && del.sizeOriginal > 0) {
+                        areFilesContentEqual(srcFile, modFile, add.isBinary, options)
+                    } else {
+                        false
+                    }
+                }
+
+                if (match != null) {
+                    matchedDeleted.add(match.relativePath)
+                    matchedAdded.add(add.relativePath)
+                    movedResults.add(
+                        add.copy(
+                            status = FileStatus.MOVED,
+                            sizeOriginal = match.sizeOriginal,
+                            originalPath = match.relativePath
+                        )
+                    )
+                }
+            }
+
+            val remainingDeleted = candidateDeleted.filter { !matchedDeleted.contains(it.relativePath) }
+            val remainingAdded = candidateAdded.filter { !matchedAdded.contains(it.relativePath) }
+
+            return@coroutineScope (unchangedAndModified + movedResults + remainingDeleted + remainingAdded)
+                .sortedBy { it.relativePath.lowercase() }
+        }
+
+        return@coroutineScope rawResults.sortedBy { it.relativePath.lowercase() }
+    }
+
+    private fun areFilesContentEqual(
+        srcFile: File,
+        modFile: File,
+        isBinary: Boolean,
+        options: DiffOptions
+    ): Boolean {
+        if (!srcFile.exists() || !modFile.exists()) return false
+        if (srcFile.length() != modFile.length() && isBinary) return false
+        return try {
+            if (isBinary) {
+                areBinaryFilesEqual(srcFile, modFile)
+            } else {
+                val srcLines = if (srcFile.name.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcFile)) {
+                    AxmlDecoder.decode(srcFile).lines()
+                } else srcFile.readLines()
+                val modLines = if (modFile.name.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(modFile)) {
+                    AxmlDecoder.decode(modFile).lines()
+                } else modFile.readLines()
+                areContentsEqual(srcLines, modLines, options)
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun areContentsEqual(

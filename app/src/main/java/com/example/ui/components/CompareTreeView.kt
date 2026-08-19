@@ -77,6 +77,7 @@ data class TreeFolderNode(
     val modifiedCount: Int,
     val addedCount: Int,
     val deletedCount: Int,
+    val movedCount: Int,
     val unchangedCount: Int,
     val hasChanges: Boolean
 )
@@ -116,6 +117,7 @@ object TreeHelper {
                 var mod = sortedFiles.count { it.status == FileStatus.MODIFIED }
                 var add = sortedFiles.count { it.status == FileStatus.ADDED }
                 var del = sortedFiles.count { it.status == FileStatus.DELETED }
+                var mov = sortedFiles.count { it.status == FileStatus.MOVED }
                 var unch = sortedFiles.count { it.status == FileStatus.UNCHANGED }
 
                 for (sub in sortedSub) {
@@ -123,6 +125,7 @@ object TreeHelper {
                     mod += sub.modifiedCount
                     add += sub.addedCount
                     del += sub.deletedCount
+                    mov += sub.movedCount
                     unch += sub.unchangedCount
                 }
 
@@ -135,8 +138,9 @@ object TreeHelper {
                     modifiedCount = mod,
                     addedCount = add,
                     deletedCount = del,
+                    movedCount = mov,
                     unchangedCount = unch,
-                    hasChanges = (mod > 0 || add > 0 || del > 0)
+                    hasChanges = (mod > 0 || add > 0 || del > 0 || mov > 0)
                 )
             }
         }
@@ -471,6 +475,7 @@ fun TreeFileCard(
         FileStatus.MODIFIED -> Color(0xFFF59E0B)
         FileStatus.ADDED -> Color(0xFF10B981)
         FileStatus.DELETED -> Color(0xFFEF4444)
+        FileStatus.MOVED -> Color(0xFF8B5CF6)
         FileStatus.UNCHANGED -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
     }
 
@@ -478,6 +483,7 @@ fun TreeFileCard(
         FileStatus.MODIFIED -> Color(0xFFF59E0B).copy(alpha = 0.14f)
         FileStatus.ADDED -> Color(0xFF10B981).copy(alpha = 0.14f)
         FileStatus.DELETED -> Color(0xFFEF4444).copy(alpha = 0.14f)
+        FileStatus.MOVED -> Color(0xFF8B5CF6).copy(alpha = 0.14f)
         FileStatus.UNCHANGED -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
     }
 
@@ -518,6 +524,7 @@ fun TreeFileCard(
                         FileStatus.MODIFIED -> Color(0xFFF59E0B)
                         FileStatus.ADDED -> Color(0xFF10B981)
                         FileStatus.DELETED -> Color(0xFFEF4444)
+                        FileStatus.MOVED -> Color(0xFF8B5CF6)
                         FileStatus.UNCHANGED -> MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
                     },
                     modifier = Modifier.size(20.dp)
@@ -554,6 +561,18 @@ fun TreeFileCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (fileStatus.status == FileStatus.MOVED && fileStatus.originalPath != null) {
+                    Text(
+                        text = "from: ${fileStatus.originalPath}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF8B5CF6),
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             // Status Badge

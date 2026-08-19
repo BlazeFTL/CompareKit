@@ -1233,11 +1233,16 @@ object DexParser {
         }
     }
 
-    fun parse(bytes: ByteArray, options: DexCompareOptions = DexCompareOptions()): Map<String, DexClass> {
+    fun parse(
+        bytes: ByteArray,
+        options: DexCompareOptions = DexCompareOptions(),
+        onProgress: ((progress: Float) -> Unit)? = null
+    ): Map<String, DexClass> {
         val result = mutableMapOf<String, DexClass>()
         if (bytes.size < 0x70) return result // Header size minimum
 
         try {
+            onProgress?.invoke(0.05f)
             val buffer = DexBuffer(bytes)
             // Verify Magic "dex\n" or similar
             val magic = String(bytes, 0, 4)
@@ -1364,6 +1369,10 @@ object DexParser {
 
             // 5. Parse Class definitions
             for (c in 0 until classDefsSize) {
+                if (onProgress != null && (c % 40 == 0 || c == classDefsSize - 1)) {
+                    val progressFraction = 0.05f + (c.toFloat() / classDefsSize.coerceAtLeast(1)) * 0.95f
+                    onProgress(progressFraction)
+                }
                 try {
                     val off = classDefsOff + c * 32
                     val classIdx = buffer.readUInt(off)

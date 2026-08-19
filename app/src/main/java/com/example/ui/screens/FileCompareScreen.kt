@@ -842,6 +842,7 @@ fun FileCompareScreen(
                                 text = when (fileItem.status) {
                                     com.example.file.FileStatus.UNCHANGED -> "These binary files are completely identical."
                                     com.example.file.FileStatus.MODIFIED -> "These binary files differ in size or byte checksum contents."
+                                    com.example.file.FileStatus.MOVED -> "This file was moved from ${fileItem.originalPath ?: "another location"}."
                                     com.example.file.FileStatus.ADDED -> "This binary file exists in the modified location only."
                                     com.example.file.FileStatus.DELETED -> "This binary file exists in the source location only."
                                 },
