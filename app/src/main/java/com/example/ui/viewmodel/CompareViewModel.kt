@@ -1306,9 +1306,10 @@ class CompareViewModel : ViewModel() {
 
             var changedCount = 0
             for ((index, fileStatus) in list.withIndex()) {
-                _exportProgress.value = index.toFloat() / total
-                _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
-                delay(5)
+                if (index % 20 == 0 || index == total - 1) {
+                    _exportProgress.value = index.toFloat() / total
+                    _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
+                }
 
                 if (fileStatus.status == FileStatus.UNCHANGED) continue
                 if (fileStatus.isBinary && !fileStatus.relativePath.lowercase().endsWith(".smali")) {
@@ -1400,9 +1401,10 @@ class CompareViewModel : ViewModel() {
 
         var changedCount = 0
         for ((index, fileStatus) in list.withIndex()) {
-            _exportProgress.value = index.toFloat() / total
-            _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
-            delay(5)
+            if (index % 20 == 0 || index == total - 1) {
+                _exportProgress.value = index.toFloat() / total
+                _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
+            }
 
             if (fileStatus.status == FileStatus.UNCHANGED) continue
             changedCount++
@@ -1537,19 +1539,9 @@ class CompareViewModel : ViewModel() {
         val isVirtualDex = _activeDexVirtualPath.value != null
 
         viewModelScope.launch {
-            _exportProgress.value = 0.0f
-            _exportProgressMsg.value = "Initializing file export..."
+            _exportProgress.value = 0.1f
+            _exportProgressMsg.value = "Preparing file export..."
             _isExportMinimized.value = false
-            delay(100)
-            _exportProgress.value = 0.2f
-            _exportProgressMsg.value = "Reading file content..."
-            delay(120)
-            _exportProgress.value = 0.5f
-            _exportProgressMsg.value = "Analyzing line differences..."
-            delay(150)
-            _exportProgress.value = 0.8f
-            _exportProgressMsg.value = "Formatting stock vs modified layout..."
-            delay(120)
 
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
@@ -1647,8 +1639,11 @@ class CompareViewModel : ViewModel() {
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
                     val reportText = generateFullReportText(list, formatAsTxt)
-                    context.contentResolver.openOutputStream(uri)?.use { out ->
-                        out.write(reportText.toByteArray(Charsets.UTF_8))
+                    context.contentResolver.openOutputStream(uri, "wt")?.let { rawOut ->
+                        java.io.BufferedOutputStream(rawOut).use { out ->
+                            out.write(reportText.toByteArray(Charsets.UTF_8))
+                            out.flush()
+                        }
                     }
                     "Report export completed and saved to storage successfully!"
                 } catch (e: Exception) {
@@ -1669,19 +1664,9 @@ class CompareViewModel : ViewModel() {
         val isVirtualDex = _activeDexVirtualPath.value != null
 
         viewModelScope.launch {
-            _exportProgress.value = 0.0f
-            _exportProgressMsg.value = "Initializing file storage export..."
+            _exportProgress.value = 0.1f
+            _exportProgressMsg.value = "Preparing file export..."
             _isExportMinimized.value = false
-            delay(100)
-            _exportProgress.value = 0.2f
-            _exportProgressMsg.value = "Reading file content..."
-            delay(120)
-            _exportProgress.value = 0.5f
-            _exportProgressMsg.value = "Analyzing line differences..."
-            delay(150)
-            _exportProgress.value = 0.8f
-            _exportProgressMsg.value = "Formatting stock vs modified layout..."
-            delay(120)
 
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
@@ -1738,8 +1723,11 @@ class CompareViewModel : ViewModel() {
                     }
 
                     val reportText = generateSingleFileReportText(selected.relativePath, diffItems, formatAsTxt)
-                    context.contentResolver.openOutputStream(uri)?.use { out ->
-                        out.write(reportText.toByteArray(Charsets.UTF_8))
+                    context.contentResolver.openOutputStream(uri, "wt")?.let { rawOut ->
+                        java.io.BufferedOutputStream(rawOut).use { out ->
+                            out.write(reportText.toByteArray(Charsets.UTF_8))
+                            out.flush()
+                        }
                     }
                     "File diff export completed and saved to storage successfully!"
                 } catch (e: Exception) {
