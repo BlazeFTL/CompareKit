@@ -22,6 +22,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -87,7 +88,7 @@ fun SplitDiffView(
     activeChangePointer: Int = -1,
     changeBlocks: List<Int> = emptyList()
 ) {
-    val splitRows = SplitAligner.align(diffLines)
+    val splitRows = remember(diffLines) { SplitAligner.align(diffLines) }
     val horizontalScrollState = rememberScrollState()
 
     val activeBlockLineRange = remember(activeChangePointer, changeBlocks, diffLines) {
@@ -135,13 +136,6 @@ fun SplitDiffView(
     }
     val computedTotalWidthDp = (computedHalfWidthDp * 2).dp
 
-    val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).dp
-    val verticalLinePadding = if (lineHeightMultiplier > 1.0f) {
-        ((lineHeightMultiplier - 1.0f) * fontSizeSp * 0.35f).dp
-    } else {
-        0.dp
-    }
-
     SelectionContainer(
         modifier = modifier.fillMaxSize()
     ) {
@@ -166,9 +160,16 @@ fun SplitDiffView(
                         .then(
                             if (!lineWrap) Modifier.width(computedTotalWidthDp) else Modifier.fillMaxWidth()
                         )
-                        .background(Color(0xFFFAFAFA))
+                        .background(MaterialTheme.colorScheme.surface)
                 ) {
-                    itemsIndexed(splitRows) { rowIndex, row ->
+                    itemsIndexed(
+                        items = splitRows,
+                        key = { rowIndex, row ->
+                            val l = row.leftItem
+                            val r = row.rightItem
+                            "${rowIndex}_${l?.type}_${l?.originalIndex}_${r?.type}_${r?.revisedIndex}"
+                        }
+                    ) { rowIndex, row ->
                         val leftIndex = row.leftItem?.let { diffLines.indexOf(it) } ?: -1
                         val rightIndex = row.rightItem?.let { diffLines.indexOf(it) } ?: -1
                         val isLeftActive = leftIndex in activeBlockLineRange
@@ -204,7 +205,7 @@ fun SplitDiffView(
                                 modifier = Modifier
                                     .fillMaxHeight()
                                     .width(1.dp)
-                                    .background(Color(0xFFE0E0E0))
+                                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                             )
 
                             // Right pane: Modified File (Inserted/Modified/Equal)
@@ -284,7 +285,7 @@ private fun CellView(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFF5F5F5))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
         ) {
             if (isActiveLine) {
                 Box(
@@ -398,61 +399,74 @@ private fun CellView(
 
         // Line Content
         val rawText = item.value
-        val baseAnnotatedText = if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
-            buildAnnotatedString {
-                append(rawText)
-                item.subHighlights.forEach { range ->
-                    val start = range.start.coerceIn(0, rawText.length)
-                    val end = range.end.coerceIn(0, rawText.length)
-                    if (start < end) {
-                        addStyle(
-                            style = SpanStyle(
-                                background = if (isLeft) {
-                                    Color(0xFFFFCC80)
-                                } else {
-                                    Color(0xFF90CAF9)
-                                },
-                                fontWeight = FontWeight.Bold
-                            ),
-                            start = start,
-                            end = end
-                        )
+        val baseAnnotatedText = remember(rawText, filename, item.type, item.subHighlights) {
+            if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
+                buildAnnotatedString {
+                    append(rawText)
+                    item.subHighlights.forEach { range ->
+                        val start = range.start.coerceIn(0, rawText.length)
+                        val end = range.end.coerceIn(0, rawText.length)
+                        if (start < end) {
+                            addStyle(
+                                style = SpanStyle(
+                                    background = if (isLeft) {
+                                        Color(0xFFFFCC80)
+                                    } else {
+                                        Color(0xFF90CAF9)
+                                    },
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                start = start,
+                                end = end
+                            )
+                        }
                     }
                 }
+            } else {
+                SyntaxHighlighter.highlight(rawText, filename)
             }
-        } else {
-            SyntaxHighlighter.highlight(rawText, filename)
         }
 
-        val annotatedText = if (searchQuery.isNotEmpty()) {
-            buildAnnotatedString {
-                append(baseAnnotatedText)
-                var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
-                while (startIndex >= 0 && startIndex < rawText.length) {
-                    val endIndex = (startIndex + searchQuery.length).coerceAtMost(rawText.length)
-                    addStyle(
-                        style = SpanStyle(
-                            background = Color(0xFFFFEB3B),
-                            color = Color.Black,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        start = startIndex,
-                        end = endIndex
-                    )
-                    startIndex = rawText.indexOf(searchQuery, startIndex + 1, ignoreCase = true)
+        val annotatedText = remember(baseAnnotatedText, searchQuery, rawText) {
+            if (searchQuery.isNotEmpty()) {
+                buildAnnotatedString {
+                    append(baseAnnotatedText)
+                    var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
+                    while (startIndex >= 0 && startIndex < rawText.length) {
+                        val endIndex = (startIndex + searchQuery.length).coerceAtMost(rawText.length)
+                        addStyle(
+                            style = SpanStyle(
+                                background = Color(0xFFFFEB3B),
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            start = startIndex,
+                            end = endIndex
+                        )
+                        startIndex = rawText.indexOf(searchQuery, startIndex + 1, ignoreCase = true)
+                    }
                 }
+            } else {
+                baseAnnotatedText
             }
-        } else {
-            baseAnnotatedText
         }
+
+        // Hanging indentation for wrapped code
+        val leadingSpaceCount = remember(rawText) { rawText.takeWhile { it == ' ' }.length }
+        val indentCharCount = if (leadingSpaceCount > 0) leadingSpaceCount else 4
+        val restLineIndentSp = (fontSizeSp * 0.60f * indentCharCount).sp
 
         val finalCodeStyle = if (item.type == DiffType.INSERT || item.type == DiffType.DELETE || item.type == DiffType.MODIFIED) {
-            monoCodeStyle.copy(color = textColor)
+            monoCodeStyle.copy(
+                color = textColor,
+                textIndent = if (lineWrap) TextIndent(firstLine = 0.sp, restLine = restLineIndentSp) else TextIndent.None
+            )
         } else {
-            monoCodeStyle.copy(color = MaterialTheme.colorScheme.onSurface)
+            monoCodeStyle.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+                textIndent = if (lineWrap) TextIndent(firstLine = 0.sp, restLine = restLineIndentSp) else TextIndent.None
+            )
         }
-
-        val textToDisplay = if (lineWrap) insertCharacterBreakOpportunities(annotatedText) else annotatedText
 
         Box(
             modifier = Modifier
@@ -460,7 +474,7 @@ private fun CellView(
                 .padding(start = 2.dp, end = 6.dp)
         ) {
             Text(
-                text = textToDisplay,
+                text = annotatedText,
                 style = finalCodeStyle,
                 softWrap = lineWrap
             )

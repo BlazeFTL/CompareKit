@@ -18,7 +18,7 @@ object SyntaxHighlighter {
     private val ATTR_COLOR = Color(0xFF3F51B5)    // Indigo
 
     // High-performance LRU Cache for rendered syntax lines
-    private val cache = LruCache<String, AnnotatedString>(4096)
+    private val cache = LruCache<String, AnnotatedString>(8192)
 
     // Precompiled static Regex instances
     private val JSON_STRING_REGEX = "\"[^\"]*\"".toRegex()
@@ -32,10 +32,18 @@ object SyntaxHighlighter {
     private val CODE_KEYWORD_REGEX = "\\b(class|fun|function|var|val|let|const|import|package|return|if|else|for|while|new|this|public|private|protected)\\b".toRegex()
     private val CODE_COMMENT_REGEX = "//.*|/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/".toRegex()
 
+    // Smali / Dex bytecode highlighters
+    private val SMALI_DIRECTIVE_REGEX = "\\.(method|end method|registers|locals|field|super|class|implements|source|annotation|end annotation|line|parameter|prologue|local|catch|catchall|array-data|end array-data|enum|restart local)\\b".toRegex()
+    private val SMALI_INSTRUCTION_REGEX = "\\b(invoke-virtual|invoke-direct|invoke-static|invoke-super|invoke-interface|invoke-custom|invoke-polymorphic|invoke-virtual/range|invoke-direct/range|invoke-static/range|invoke-super/range|invoke-interface/range|const-string|const-class|const-wide|const/4|const/16|const|const-wide/16|const-wide/32|const-wide/high16|const/high16|move-result|move-result-object|move-result-wide|move-exception|move|move/from16|move/16|move-wide|move-object|return|return-void|return-object|return-wide|if-eq|if-ne|if-lt|if-ge|if-gt|if-le|if-eqz|if-nez|if-ltz|if-gez|if-gtz|if-lez|goto|goto/16|goto/32|new-instance|new-array|check-cast|instance-of|array-length|fill-array-data|aget|aget-wide|aget-object|aget-boolean|aget-byte|aget-char|aget-short|aput|aput-wide|aput-object|aput-boolean|aput-byte|aput-char|aput-short|iget|iget-wide|iget-object|iget-boolean|iget-byte|iget-char|iget-short|iput|iput-wide|iput-object|iput-boolean|iput-byte|iput-char|iput-short|sget|sget-wide|sget-object|sget-boolean|sget-byte|sget-char|sget-short|sput|sput-wide|sput-object|sput-boolean|sput-byte|sput-char|sput-short|throw|monitor-enter|monitor-exit|packed-switch|sparse-switch|nop|public|private|protected|static|final|abstract|synthetic|native|synchronized|bridge|transient|volatile)\\b".toRegex()
+    private val SMALI_LABEL_REGEX = ":[a-zA-Z0-9_]+".toRegex()
+    private val SMALI_REGISTER_REGEX = "\\b[vp][0-9]+\\b".toRegex()
+    private val SMALI_COMMENT_REGEX = "#.*".toRegex()
+    private val SMALI_NUMBER_REGEX = "-?0x[0-9a-fA-F]+|-?\\d+L?".toRegex()
+
     fun highlight(text: String, filename: String): AnnotatedString {
         if (text.isEmpty()) return AnnotatedString("")
         val ext = filename.lowercase().substringAfterLast('.', "")
-        if (ext !in setOf("json", "xml", "html", "htm", "js", "ts", "kt", "java", "css", "smali")) {
+        if (ext !in setOf("json", "xml", "html", "htm", "js", "ts", "kt", "java", "css", "smali", "dex")) {
             return AnnotatedString(text)
         }
 
@@ -48,12 +56,68 @@ object SyntaxHighlighter {
         val result = when (ext) {
             "json" -> highlightJson(text)
             "xml", "html", "htm" -> highlightXmlHtml(text)
-            "js", "ts", "kt", "java", "css", "smali" -> highlightCode(text)
+            "smali", "dex" -> highlightSmali(text)
+            "js", "ts", "kt", "java", "css" -> highlightCode(text)
             else -> AnnotatedString(text)
         }
 
         cache.put(cacheKey, result)
         return result
+    }
+
+    private fun highlightSmali(text: String): AnnotatedString {
+        val stringMatches = CODE_STRING_REGEX.findAll(text).toList()
+        val commentMatches = SMALI_COMMENT_REGEX.findAll(text).toList()
+        val ignoreRanges = stringMatches + commentMatches
+
+        return buildAnnotatedString {
+            append(text)
+
+            // Directives (.method, .registers, etc.)
+            SMALI_DIRECTIVE_REGEX.findAll(text).forEach { match ->
+                if (!isInsideRanges(match.range.first, ignoreRanges)) {
+                    addStyle(SpanStyle(color = KEYWORD_COLOR, fontWeight = FontWeight.Bold), match.range.first, match.range.last + 1)
+                }
+            }
+
+            // Instructions (invoke-virtual, const-string, if-nez, etc.)
+            SMALI_INSTRUCTION_REGEX.findAll(text).forEach { match ->
+                if (!isInsideRanges(match.range.first, ignoreRanges)) {
+                    addStyle(SpanStyle(color = KEYWORD_COLOR, fontWeight = FontWeight.Bold), match.range.first, match.range.last + 1)
+                }
+            }
+
+            // Labels (:label_1, :goto_0, etc.)
+            SMALI_LABEL_REGEX.findAll(text).forEach { match ->
+                if (!isInsideRanges(match.range.first, ignoreRanges)) {
+                    addStyle(SpanStyle(color = TAG_COLOR, fontWeight = FontWeight.Medium), match.range.first, match.range.last + 1)
+                }
+            }
+
+            // Registers (v0, v1, p0, p1, etc.)
+            SMALI_REGISTER_REGEX.findAll(text).forEach { match ->
+                if (!isInsideRanges(match.range.first, ignoreRanges)) {
+                    addStyle(SpanStyle(color = ATTR_COLOR, fontWeight = FontWeight.Normal), match.range.first, match.range.last + 1)
+                }
+            }
+
+            // Numbers & Hex
+            SMALI_NUMBER_REGEX.findAll(text).forEach { match ->
+                if (!isInsideRanges(match.range.first, ignoreRanges)) {
+                    addStyle(SpanStyle(color = NUMBER_COLOR), match.range.first, match.range.last + 1)
+                }
+            }
+
+            // String literals
+            stringMatches.forEach { match ->
+                addStyle(SpanStyle(color = STRING_COLOR), match.range.first, match.range.last + 1)
+            }
+
+            // Comments
+            commentMatches.forEach { match ->
+                addStyle(SpanStyle(color = COMMENT_COLOR, fontFamily = FontFamily.Monospace), match.range.first, match.range.last + 1)
+            }
+        }
     }
 
     private fun highlightJson(text: String): AnnotatedString {

@@ -25,6 +25,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -123,6 +124,8 @@ fun UnifiedDiffView(
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 
+    val isDarkMode = MaterialTheme.colorScheme.surface.let { (it.red + it.green + it.blue) / 3f < 0.5f }
+
     SelectionContainer(
         modifier = modifier.fillMaxSize()
     ) {
@@ -149,10 +152,10 @@ fun UnifiedDiffView(
                         )
                         .background(MaterialTheme.colorScheme.surface)
                 ) {
-                    itemsIndexed(diffLines) { index, item ->
-                        // Line styling matching Screenshot 3
-                        val isDarkMode = MaterialTheme.colorScheme.surface.let { (it.red + it.green + it.blue) / 3f < 0.5f }
-                        
+                    itemsIndexed(
+                        items = diffLines,
+                        key = { index, item -> "${index}_${item.type}_${item.originalIndex}_${item.revisedIndex}" }
+                    ) { index, item ->
                         val (bgColor, prefixColor, textColor) = when (item.type) {
                             DiffType.INSERT -> {
                                 if (isDarkMode) {
@@ -299,65 +302,73 @@ fun UnifiedDiffView(
 
                             // Line text content
                             val rawText = item.value
-                            val baseAnnotatedText = if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
-                                buildAnnotatedString {
-                                    append(rawText)
-                                    item.subHighlights.forEach { range ->
-                                        val start = range.start.coerceIn(0, rawText.length)
-                                        val end = range.end.coerceIn(0, rawText.length)
-                                        if (start < end) {
-                                            addStyle(
-                                                style = SpanStyle(
-                                                    background = if (item.originalIndex != null) {
-                                                        Color(0xFFFFCC80) // Amber highlight
-                                                    } else {
-                                                        Color(0xFF90CAF9) // Blue/Cyan highlight
-                                                    },
-                                                    fontWeight = FontWeight.Bold
-                                                ),
-                                                start = start,
-                                                end = end
-                                            )
+                            val baseAnnotatedText = remember(rawText, filename, item.type, item.subHighlights) {
+                                if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
+                                    buildAnnotatedString {
+                                        append(rawText)
+                                        item.subHighlights.forEach { range ->
+                                            val start = range.start.coerceIn(0, rawText.length)
+                                            val end = range.end.coerceIn(0, rawText.length)
+                                            if (start < end) {
+                                                addStyle(
+                                                    style = SpanStyle(
+                                                        background = if (item.originalIndex != null) {
+                                                            Color(0xFFFFCC80) // Amber highlight
+                                                        } else {
+                                                            Color(0xFF90CAF9) // Blue/Cyan highlight
+                                                        },
+                                                        fontWeight = FontWeight.Bold
+                                                    ),
+                                                    start = start,
+                                                    end = end
+                                                )
+                                            }
                                         }
                                     }
+                                } else {
+                                    SyntaxHighlighter.highlight(rawText, filename)
                                 }
-                            } else {
-                                SyntaxHighlighter.highlight(rawText, filename)
                             }
 
-                            val annotatedText = if (searchQuery.isNotEmpty()) {
-                                buildAnnotatedString {
-                                    append(baseAnnotatedText)
-                                    var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
-                                    while (startIndex >= 0 && startIndex < rawText.length) {
-                                        val endIndex = (startIndex + searchQuery.length).coerceAtMost(rawText.length)
-                                        addStyle(
-                                            style = SpanStyle(
-                                                background = Color(0xFFFFEB3B),
-                                                color = Color.Black,
-                                                fontWeight = FontWeight.Bold
-                                            ),
-                                            start = startIndex,
-                                            end = endIndex
-                                        )
-                                        startIndex = rawText.indexOf(searchQuery, startIndex + 1, ignoreCase = true)
+                            val annotatedText = remember(baseAnnotatedText, searchQuery, rawText) {
+                                if (searchQuery.isNotEmpty()) {
+                                    buildAnnotatedString {
+                                        append(baseAnnotatedText)
+                                        var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
+                                        while (startIndex >= 0 && startIndex < rawText.length) {
+                                            val endIndex = (startIndex + searchQuery.length).coerceAtMost(rawText.length)
+                                            addStyle(
+                                                style = SpanStyle(
+                                                    background = Color(0xFFFFEB3B),
+                                                    color = Color.Black,
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                start = startIndex,
+                                                end = endIndex
+                                            )
+                                            startIndex = rawText.indexOf(searchQuery, startIndex + 1, ignoreCase = true)
+                                        }
                                     }
+                                } else {
+                                    baseAnnotatedText
                                 }
-                            } else {
-                                baseAnnotatedText
                             }
 
-                            // Break lines exactly at character level if lineWrap is enabled
-                            val displayAnnotatedText = if (lineWrap) {
-                                insertCharacterBreakOpportunities(annotatedText)
-                            } else {
-                                annotatedText
-                            }
+                            // Compute hanging indentation so wrapped lines align cleanly below statements (e.g. below `invoke`)
+                            val leadingSpaceCount = remember(rawText) { rawText.takeWhile { it == ' ' }.length }
+                            val indentCharCount = if (leadingSpaceCount > 0) leadingSpaceCount else 4
+                            val restLineIndentSp = (fontSizeSp * 0.60f * indentCharCount).sp
 
                             val finalCodeStyle = if (item.type == DiffType.INSERT || item.type == DiffType.DELETE) {
-                                monoCodeStyle.copy(color = textColor)
+                                monoCodeStyle.copy(
+                                    color = textColor,
+                                    textIndent = if (lineWrap) TextIndent(firstLine = 0.sp, restLine = restLineIndentSp) else TextIndent.None
+                                )
                             } else {
-                                monoCodeStyle.copy(color = MaterialTheme.colorScheme.onSurface)
+                                monoCodeStyle.copy(
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textIndent = if (lineWrap) TextIndent(firstLine = 0.sp, restLine = restLineIndentSp) else TextIndent.None
+                                )
                             }
 
                             Box(
@@ -366,7 +377,7 @@ fun UnifiedDiffView(
                                     .padding(start = 2.dp, end = 12.dp)
                             ) {
                                 Text(
-                                    text = displayAnnotatedText,
+                                    text = annotatedText,
                                     style = finalCodeStyle,
                                     softWrap = lineWrap
                                 )
@@ -446,44 +457,5 @@ fun HorizontalScrollBar(
                 .background(thumbColor, shape = RoundedCornerShape(2.dp))
         )
     }
-}
-
-/**
- * Inserts zero-width spaces (\u200B) between characters to allow Compose Text
- * to wrap strictly at the screen boundary / character level rather than only on word/token boundaries.
- * Optimized with fast-path and length caps to keep scrolling 60fps+ on large files.
- */
-fun insertCharacterBreakOpportunities(annotatedString: AnnotatedString): AnnotatedString {
-    val text = annotatedString.text
-    if (text.isEmpty() || text.length > 5000) return annotatedString
-    // If text already contains whitespace or punctuation, standard wrapping is already sufficient
-    if (text.any { it.isWhitespace() } && text.length > 300) return annotatedString
-
-    val sb = StringBuilder(text.length * 2)
-    val indexMap = IntArray(text.length + 1)
-
-    for (i in text.indices) {
-        indexMap[i] = sb.length
-        sb.append(text[i])
-        if (text[i] != '\n' && text[i] != '\r') {
-            sb.append('\u200B')
-        }
-    }
-    indexMap[text.length] = sb.length
-
-    val newText = sb.toString()
-    val builder = AnnotatedString.Builder(newText)
-
-    if (annotatedString.spanStyles.isNotEmpty()) {
-        for (span in annotatedString.spanStyles) {
-            val newStart = indexMap[span.start.coerceIn(0, text.length)]
-            val newEnd = indexMap[span.end.coerceIn(0, text.length)]
-            if (newStart < newEnd) {
-                builder.addStyle(span.item, newStart, newEnd)
-            }
-        }
-    }
-
-    return builder.toAnnotatedString()
 }
 
