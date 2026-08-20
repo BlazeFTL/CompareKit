@@ -155,6 +155,44 @@ object FileHelper {
         }
     }
 
+    fun getAllZipDexEntriesBytes(zipFile: File): List<ByteArray> {
+        if (!zipFile.exists() || !zipFile.isFile) return emptyList()
+        return try {
+            ZipFile(zipFile).use { zip ->
+                val dexEntries = zip.entries().asSequence()
+                    .filter { entry ->
+                        !entry.isDirectory && entry.name.removePrefix("/").matches(Regex("(?i)(.*classes\\d*\\.dex|.*\\.dex)"))
+                    }
+                    .sortedBy { it.name }
+                    .toList()
+                dexEntries.mapNotNull { entry ->
+                    try {
+                        zip.getInputStream(entry).use { it.readBytes() }
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun getAllDirectoryDexBytes(dir: File): List<ByteArray> {
+        if (!dir.exists() || !dir.isDirectory) return emptyList()
+        return try {
+            val dexFiles = dir.walkTopDown()
+                .filter { it.isFile && it.name.lowercase().endsWith(".dex") }
+                .sortedBy { it.name }
+                .toList()
+            dexFiles.mapNotNull { file ->
+                try { file.readBytes() } catch (e: Exception) { null }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     fun getZipEntryLines(zipFile: File, entryPath: String): List<String>? {
         if (!zipFile.exists() || !zipFile.isFile) return null
         return try {

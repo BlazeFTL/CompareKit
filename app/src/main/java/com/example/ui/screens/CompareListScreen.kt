@@ -1373,14 +1373,6 @@ fun CompareListScreen(
 
                             val filteredList = remember(fileList, searchQuery, statusFilter, ignorePatterns) {
                                 fileList.filter { file ->
-                                    val ext = file.relativePath.substringAfterLast('.', "").lowercase()
-                                    val isNonComparable = ext in setOf(
-                                        "jpg", "jpeg", "png", "gif", "bmp", "webp",
-                                        "mp4", "mkv", "avi", "mov", "mp3", "wav", "flac", "ogg",
-                                        "pdf", "ttf", "otf", "woff", "woff2", "apk", "exe", "dmg", "iso"
-                                    )
-                                    if (isNonComparable) return@filter false
-
                                     val matchQuery = file.relativePath.contains(searchQuery, ignoreCase = true)
                                     val matchStatus = if (statusFilter == null) {
                                         file.status != FileStatus.UNCHANGED

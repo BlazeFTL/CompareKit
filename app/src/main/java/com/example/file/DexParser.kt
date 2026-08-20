@@ -328,38 +328,40 @@ object DexParser {
         return filtered
     }
 
-    private fun computeMethodCodeHash(buffer: DexBuffer, bytes: ByteArray, codeOff: Int, options: DexCompareOptions): String {
+    private fun computeMethodCodeHash(
+        buffer: DexBuffer,
+        bytes: ByteArray,
+        codeOff: Int,
+        resolveString: (Int) -> String,
+        resolveType: (Int) -> String,
+        resolveField: (Int) -> DexFieldData,
+        resolveMethod: (Int) -> DexMethodData,
+        fieldIdsOff: Int,
+        methodIdsOff: Int,
+        options: DexCompareOptions
+    ): String {
         if (codeOff == 0) return ""
         return try {
-            val insnsSize = buffer.readUInt(codeOff + 12)
-            if (insnsSize <= 0) return ""
-            val codeStart = codeOff + 16
-            val codeEnd = codeStart + insnsSize * 2
-            if (codeEnd > bytes.size) return ""
-
-            var hash = -3750763034362895579L // FNV-1a 64-bit offset basis
+            val raw = disassembleMethod(
+                buffer,
+                bytes,
+                codeOff,
+                resolveString,
+                resolveType,
+                resolveField,
+                resolveMethod,
+                fieldIdsOff,
+                methodIdsOff,
+                options
+            )
+            val normalized = normalizeInstructions(raw)
             val fnvPrime = 1099511628211L
-
-            val ignoreNop = options.ignoreNopInstruction
-            val ignoreOpt = options.ignoreCompilationOptimizations
-
-            var i = codeStart
-            while (i < codeEnd) {
-                val b1 = bytes[i].toInt() and 0xFF
-                val b2 = if (i + 1 < codeEnd) bytes[i + 1].toInt() and 0xFF else 0
-
-                if (ignoreNop && b1 == 0 && b2 == 0) {
-                    i += 2
-                    continue
+            var hash = -3750763034362895579L
+            for (insn in normalized) {
+                for (ch in insn) {
+                    hash = (hash xor ch.code.toLong()) * fnvPrime
                 }
-
-                if (ignoreOpt) {
-                    hash = (hash xor b1.toLong()) * fnvPrime
-                } else {
-                    hash = (hash xor b1.toLong()) * fnvPrime
-                    hash = (hash xor b2.toLong()) * fnvPrime
-                }
-                i += 2
+                hash = (hash xor '\n'.code.toLong()) * fnvPrime
             }
             java.lang.Long.toHexString(hash)
         } catch (e: Exception) {
@@ -1073,173 +1075,13 @@ object DexParser {
                 return false
             }
 
-            val buf1 = DexBuffer(bytes1)
-            val buf2 = DexBuffer(bytes2)
+            val classes1 = parse(bytes1, options)
+            val classes2 = parse(bytes2, options)
 
-            val classDefsSize1 = buf1.readUInt(0x60)
-            val classDefsOff1 = buf1.readUInt(0x64)
-            val classDefsSize2 = buf2.readUInt(0x60)
-            val classDefsOff2 = buf2.readUInt(0x64)
-
-            if (classDefsSize1 != classDefsSize2) {
-                return false
-            }
-
-            val stringIdsSize1 = buf1.readUInt(0x38)
-            val stringIdsOff1 = buf1.readUInt(0x3c)
-            val typeIdsSize1 = buf1.readUInt(0x40)
-            val typeIdsOff1 = buf1.readUInt(0x44)
-            val fieldIdsSize1 = buf1.readUInt(0x50)
-            val fieldIdsOff1 = buf1.readUInt(0x54)
-            val methodIdsSize1 = buf1.readUInt(0x58)
-            val methodIdsOff1 = buf1.readUInt(0x5c)
-
-            val stringIdsSize2 = buf2.readUInt(0x38)
-            val stringIdsOff2 = buf2.readUInt(0x3c)
-            val typeIdsSize2 = buf2.readUInt(0x40)
-            val typeIdsOff2 = buf2.readUInt(0x44)
-            val fieldIdsSize2 = buf2.readUInt(0x50)
-            val fieldIdsOff2 = buf2.readUInt(0x54)
-            val methodIdsSize2 = buf2.readUInt(0x58)
-            val methodIdsOff2 = buf2.readUInt(0x5c)
-
-            fun extractClassSignatures(
-                buf: DexBuffer,
-                rawBytes: ByteArray,
-                cOff: Int,
-                cSize: Int,
-                sOff: Int,
-                sSize: Int,
-                tOff: Int,
-                tSize: Int,
-                mOff: Int,
-                fOff: Int
-            ): Map<String, String> {
-                val strCache = arrayOfNulls<String>(sSize)
-                fun resolveString(idx: Int): String {
-                    if (idx !in 0 until sSize) return ""
-                    var s = strCache[idx]
-                    if (s == null) {
-                        s = try {
-                            val off = buf.readUInt(sOff + idx * 4)
-                            buf.readString(off)
-                        } catch (e: Exception) { "" }
-                        strCache[idx] = s
-                    }
-                    return s
-                }
-
-                val typCache = arrayOfNulls<String>(tSize)
-                fun resolveType(idx: Int): String {
-                    if (idx !in 0 until tSize) return ""
-                    var t = typCache[idx]
-                    if (t == null) {
-                        t = try {
-                            val descriptorIdx = buf.readUInt(tOff + idx * 4)
-                            resolveString(descriptorIdx)
-                        } catch (e: Exception) { "" }
-                        typCache[idx] = t
-                    }
-                    return t
-                }
-
-                val signatures = mutableMapOf<String, String>()
-                for (c in 0 until cSize) {
-                    val off = cOff + c * 32
-                    val classIdx = buf.readUInt(off)
-                    val accessFlags = buf.readUInt(off + 4)
-                    val superclassIdx = buf.readUInt(off + 8)
-                    val classDataOff = buf.readUInt(off + 24)
-
-                    val className = resolveType(classIdx)
-                    if (className.isEmpty()) continue
-
-                    val superName = resolveType(superclassIdx)
-                    val sb = StringBuilder(128)
-                    sb.append(className).append(';').append(superName).append(';')
-
-                    val effectiveFlags = if (options.ignoreCompilationOptimizations) (accessFlags and 0x1000.inv()) else accessFlags
-                    sb.append(effectiveFlags).append(';')
-
-                    if (classDataOff != 0) {
-                        var currOff = classDataOff
-                        val p1 = buf.readUleb128Packed(currOff)
-                        val staticFieldsSize = (p1 and 0xFFFFFFFFL).toInt()
-                        currOff += (p1 ushr 32).toInt()
-
-                        val p2 = buf.readUleb128Packed(currOff)
-                        val instanceFieldsSize = (p2 and 0xFFFFFFFFL).toInt()
-                        currOff += (p2 ushr 32).toInt()
-
-                        val p3 = buf.readUleb128Packed(currOff)
-                        val directMethodsSize = (p3 and 0xFFFFFFFFL).toInt()
-                        currOff += (p3 ushr 32).toInt()
-
-                        val p4 = buf.readUleb128Packed(currOff)
-                        val virtualMethodsSize = (p4 and 0xFFFFFFFFL).toInt()
-                        currOff += (p4 ushr 32).toInt()
-
-                        var lastFieldIdx = 0
-                        val totalFields = staticFieldsSize + instanceFieldsSize
-                        for (f in 0 until totalFields) {
-                            val fp1 = buf.readUleb128Packed(currOff)
-                            lastFieldIdx += (fp1 and 0xFFFFFFFFL).toInt()
-                            currOff += (fp1 ushr 32).toInt()
-
-                            val fp2 = buf.readUleb128Packed(currOff)
-                            currOff += (fp2 ushr 32).toInt()
-
-                            val fieldTypeIdx = buf.readUShort(fOff + lastFieldIdx * 8 + 2)
-                            val fieldNameIdx = buf.readUInt(fOff + lastFieldIdx * 8 + 4)
-                            val fname = resolveString(fieldNameIdx)
-                            val ftype = resolveType(fieldTypeIdx)
-                            sb.append("f:").append(fname).append(':').append(ftype).append(',')
-                        }
-
-                        var lastMethodIdx = 0
-                        val totalMethods = directMethodsSize + virtualMethodsSize
-                        for (m in 0 until totalMethods) {
-                            val mp1 = buf.readUleb128Packed(currOff)
-                            lastMethodIdx += (mp1 and 0xFFFFFFFFL).toInt()
-                            currOff += (mp1 ushr 32).toInt()
-
-                            val mp2 = buf.readUleb128Packed(currOff)
-                            val flags = (mp2 and 0xFFFFFFFFL).toInt()
-                            currOff += (mp2 ushr 32).toInt()
-
-                            val mp3 = buf.readUleb128Packed(currOff)
-                            val codeOff = (mp3 and 0xFFFFFFFFL).toInt()
-                            currOff += (mp3 ushr 32).toInt()
-
-                            if (options.ignoreCompilationOptimizations && ((flags and 0x1000) != 0 || (flags and 0x0040) != 0)) {
-                                continue
-                            }
-
-                            val methodNameIdx = buf.readUInt(mOff + lastMethodIdx * 8 + 4)
-                            val mname = resolveString(methodNameIdx)
-                            val codeHash = if (codeOff != 0) computeMethodCodeHash(buf, rawBytes, codeOff, options) else ""
-                            sb.append("m:").append(mname).append('=').append(codeHash).append(',')
-                        }
-                    }
-                    signatures[className] = sb.toString()
-                }
-                return signatures
-            }
-
-            val sigs1 = extractClassSignatures(
-                buf1, bytes1, classDefsOff1, classDefsSize1,
-                stringIdsOff1, stringIdsSize1, typeIdsOff1, typeIdsSize1,
-                methodIdsOff1, fieldIdsOff1
-            )
-            val sigs2 = extractClassSignatures(
-                buf2, bytes2, classDefsOff2, classDefsSize2,
-                stringIdsOff2, stringIdsSize2, typeIdsOff2, typeIdsSize2,
-                methodIdsOff2, fieldIdsOff2
-            )
-
-            if (sigs1.size != sigs2.size) return false
-            for ((className, sig) in sigs1) {
-                if (sigs2[className] != sig) return false
+            if (classes1.size != classes2.size) return false
+            for ((className, cls1) in classes1) {
+                val cls2 = classes2[className] ?: return false
+                if (cls1.signature != cls2.signature) return false
             }
             true
         } catch (e: Exception) {
@@ -1529,7 +1371,18 @@ object DexParser {
 
                             val regCount = if (codeOff != 0) buffer.readUShort(codeOff) else 0
                             val methodCodeHash = if (codeOff != 0) {
-                                computeMethodCodeHash(buffer, bytes, codeOff, options)
+                                computeMethodCodeHash(
+                                    buffer,
+                                    bytes,
+                                    codeOff,
+                                    ::resolveString,
+                                    ::resolveType,
+                                    ::resolveField,
+                                    ::resolveMethod,
+                                    fieldIdsOff,
+                                    methodIdsOff,
+                                    options
+                                )
                             } else {
                                 ""
                             }
@@ -1561,7 +1414,18 @@ object DexParser {
 
                             val regCount = if (codeOff != 0) buffer.readUShort(codeOff) else 0
                             val methodCodeHash = if (codeOff != 0) {
-                                computeMethodCodeHash(buffer, bytes, codeOff, options)
+                                computeMethodCodeHash(
+                                    buffer,
+                                    bytes,
+                                    codeOff,
+                                    ::resolveString,
+                                    ::resolveType,
+                                    ::resolveField,
+                                    ::resolveMethod,
+                                    fieldIdsOff,
+                                    methodIdsOff,
+                                    options
+                                )
                             } else {
                                 ""
                             }
