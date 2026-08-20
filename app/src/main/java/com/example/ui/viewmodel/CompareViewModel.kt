@@ -125,6 +125,17 @@ class CompareViewModel : ViewModel() {
     private val _isExportMinimized = MutableStateFlow(false)
     val isExportMinimized: StateFlow<Boolean> = _isExportMinimized.asStateFlow()
 
+    // Focus Mode (Context Lines Around Changes)
+    private val _focusModeEnabled = MutableStateFlow(false)
+    val focusModeEnabled: StateFlow<Boolean> = _focusModeEnabled.asStateFlow()
+
+    private val _focusContextLines = MutableStateFlow(20)
+    val focusContextLines: StateFlow<Int> = _focusContextLines.asStateFlow()
+
+    // Hidden Lines Filter in Diff Editor (Hides lines containing given keywords/phrases)
+    private val _hiddenLineKeywords = MutableStateFlow<List<String>>(emptyList())
+    val hiddenLineKeywords: StateFlow<List<String>> = _hiddenLineKeywords.asStateFlow()
+
     fun setExportProgress(progress: Float?) {
         _exportProgress.value = progress
         if (progress == null) {
@@ -981,6 +992,52 @@ class CompareViewModel : ViewModel() {
             ignoreNopInstruction = ignoreNopInstruction,
             ignoreFieldInitialValues = ignoreFieldInitialValues
         )
+
+        _focusModeEnabled.value = sharedPrefs?.getBoolean("focus_mode_enabled", false) ?: false
+        _focusContextLines.value = sharedPrefs?.getInt("focus_context_lines", 20) ?: 20
+        val savedKeywords = sharedPrefs?.getStringSet("hidden_line_keywords", emptySet()) ?: emptySet()
+        _hiddenLineKeywords.value = savedKeywords.toList()
+    }
+
+    fun setFocusModeEnabled(enabled: Boolean) {
+        _focusModeEnabled.value = enabled
+        sharedPrefs?.edit()?.putBoolean("focus_mode_enabled", enabled)?.apply()
+    }
+
+    fun toggleFocusMode() {
+        setFocusModeEnabled(!_focusModeEnabled.value)
+    }
+
+    fun setFocusContextLines(lines: Int) {
+        val clamped = lines.coerceIn(0, 1000)
+        _focusContextLines.value = clamped
+        sharedPrefs?.edit()?.putInt("focus_context_lines", clamped)?.apply()
+    }
+
+    fun addHiddenLineKeyword(keyword: String) {
+        val trimmed = keyword.trim()
+        if (trimmed.isNotEmpty() && !_hiddenLineKeywords.value.contains(trimmed)) {
+            val updated = _hiddenLineKeywords.value + trimmed
+            _hiddenLineKeywords.value = updated
+            sharedPrefs?.edit()?.putStringSet("hidden_line_keywords", updated.toSet())?.apply()
+        }
+    }
+
+    fun removeHiddenLineKeyword(keyword: String) {
+        val updated = _hiddenLineKeywords.value.filter { it != keyword }
+        _hiddenLineKeywords.value = updated
+        sharedPrefs?.edit()?.putStringSet("hidden_line_keywords", updated.toSet())?.apply()
+    }
+
+    fun clearHiddenLineKeywords() {
+        _hiddenLineKeywords.value = emptyList()
+        sharedPrefs?.edit()?.remove("hidden_line_keywords")?.apply()
+    }
+
+    fun setHiddenLineKeywords(keywords: List<String>) {
+        val distinct = keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        _hiddenLineKeywords.value = distinct
+        sharedPrefs?.edit()?.putStringSet("hidden_line_keywords", distinct.toSet())?.apply()
     }
 
     fun setAppTheme(theme: AppTheme) {

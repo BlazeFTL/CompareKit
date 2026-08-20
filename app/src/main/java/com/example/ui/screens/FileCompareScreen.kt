@@ -33,6 +33,7 @@ import com.example.diff.DiffType
 import com.example.file.DexCompareOptions
 import com.example.ui.components.DexCompareView
 import com.example.ui.components.DiffSettingsDialog
+import com.example.ui.components.FocusAndFilterDialog
 import com.example.ui.components.SplitDiffView
 import com.example.ui.components.UnifiedDiffView
 import com.example.ui.viewmodel.CompareViewModel
@@ -55,6 +56,10 @@ fun FileCompareScreen(
     val dexCompareOptions by viewModel.dexCompareOptions.collectAsState()
     val selectedDexClassDetail by viewModel.selectedDexClassDetail.collectAsState()
 
+    val focusModeEnabled by viewModel.focusModeEnabled.collectAsState()
+    val focusContextLines by viewModel.focusContextLines.collectAsState()
+    val hiddenLineKeywords by viewModel.hiddenLineKeywords.collectAsState()
+
     val fileItem = selectedFile ?: return
 
     val showLineNumbers by viewModel.showLineNumbers.collectAsState()
@@ -70,6 +75,7 @@ fun FileCompareScreen(
     var showMenu by remember { mutableStateOf(false) }
     var fontSize by remember { mutableStateOf(13f) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showFocusFilterDialog by remember { mutableStateOf(false) }
 
     var showExportDialog by remember { mutableStateOf(false) }
     var exportFormatChoice by remember { mutableStateOf(0) } // 0 = .diff, 1 = .txt, 2 = .zip
@@ -95,11 +101,56 @@ fun FileCompareScreen(
         }
     }
 
+    // Compute effective diff lines by applying (1) Hidden Line Filter and (2) Focus Mode (Context Window)
+    val effectiveDiffLines = remember(diffLines, focusModeEnabled, focusContextLines, hiddenLineKeywords) {
+        if (!focusModeEnabled && hiddenLineKeywords.isEmpty()) {
+            return@remember diffLines
+        }
+
+        // 1. Keyword line filtering: hide every line containing any specified pattern or sentence
+        val afterKeywordFilter = if (hiddenLineKeywords.isEmpty()) {
+            diffLines
+        } else {
+            diffLines.filter { item ->
+                val lineContent = item.value
+                !hiddenLineKeywords.any { kw ->
+                    kw.isNotBlank() && lineContent.contains(kw.trim(), ignoreCase = true)
+                }
+            }
+        }
+
+        // 2. Focus Mode filtering: keep only N lines above and below any modified/added/deleted lines
+        if (!focusModeEnabled) {
+            afterKeywordFilter
+        } else {
+            val changeIndices = mutableListOf<Int>()
+            afterKeywordFilter.forEachIndexed { idx, item ->
+                if (item.type != DiffType.EQUAL) {
+                    changeIndices.add(idx)
+                }
+            }
+
+            if (changeIndices.isEmpty()) {
+                afterKeywordFilter
+            } else {
+                val visibleMask = BooleanArray(afterKeywordFilter.size)
+                for (cIdx in changeIndices) {
+                    val start = (cIdx - focusContextLines).coerceAtLeast(0)
+                    val end = (cIdx + focusContextLines).coerceAtMost(afterKeywordFilter.size - 1)
+                    for (k in start..end) {
+                        visibleMask[k] = true
+                    }
+                }
+                afterKeywordFilter.filterIndexed { index, _ -> visibleMask[index] }
+            }
+        }
+    }
+
     // Group contiguous non-equal lines into cohesive change blocks (for Up/Down traversal)
-    val changeBlocks = remember(diffLines) {
+    val changeBlocks = remember(effectiveDiffLines) {
         val blocks = mutableListOf<Int>()
         var inBlock = false
-        diffLines.forEachIndexed { idx, item ->
+        effectiveDiffLines.forEachIndexed { idx, item ->
             if (item.type != DiffType.EQUAL) {
                 if (!inBlock) {
                     blocks.add(idx)
@@ -116,7 +167,7 @@ fun FileCompareScreen(
     var currentChangePointer by remember { mutableStateOf(-1) }
 
     // Reset pointer and auto-scroll to the first diff automatically
-    LaunchedEffect(selectedFile, diffLines) {
+    LaunchedEffect(selectedFile, effectiveDiffLines) {
         if (changeBlocks.isNotEmpty()) {
             currentChangePointer = 0
             coroutineScope.launch {
@@ -129,11 +180,11 @@ fun FileCompareScreen(
     }
 
     // Find line indices of all search matches
-    val searchMatchLineIndices = remember(diffLines, fileSearchQuery) {
+    val searchMatchLineIndices = remember(effectiveDiffLines, fileSearchQuery) {
         if (fileSearchQuery.isBlank()) emptyList<Int>()
         else {
-            diffLines.indices.filter { idx ->
-                diffLines[idx].value.contains(fileSearchQuery, ignoreCase = true)
+            effectiveDiffLines.indices.filter { idx ->
+                effectiveDiffLines[idx].value.contains(fileSearchQuery, ignoreCase = true)
             }
         }
     }
@@ -183,6 +234,34 @@ fun FileCompareScreen(
                     },
                     actions = {
                         if (!fileItem.relativePath.lowercase().endsWith(".dex")) {
+                            // Focus Mode & Hide Lines Filter Button with Active Indicator
+                            val isFilterActive = focusModeEnabled || hiddenLineKeywords.isNotEmpty()
+                            IconButton(onClick = { showFocusFilterDialog = true }) {
+                                BadgedBox(
+                                    badge = {
+                                        if (isFilterActive) {
+                                            Badge(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            ) {
+                                                val totalActive = (if (focusModeEnabled) 1 else 0) + hiddenLineKeywords.size
+                                                Text(
+                                                    text = if (focusModeEnabled && hiddenLineKeywords.isEmpty()) "${focusContextLines}L" else "$totalActive",
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFilterActive) Icons.Filled.VisibilityOff else Icons.Outlined.VisibilityOff,
+                                        contentDescription = if (isFilterActive) "Focus & Line Filters Active" else "Focus & Line Filters",
+                                        tint = if (isFilterActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
                             // Search button
                             IconButton(onClick = { isSearchExpanded = !isSearchExpanded }) {
                                 Icon(
@@ -610,6 +689,55 @@ fun FileCompareScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clickable {
+                                                showFocusFilterDialog = true
+                                                showMenu = false
+                                            }
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (focusModeEnabled || hiddenLineKeywords.isNotEmpty()) Icons.Filled.VisibilityOff else Icons.Outlined.VisibilityOff,
+                                                contentDescription = null,
+                                                tint = if (focusModeEnabled || hiddenLineKeywords.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Column {
+                                                Text(
+                                                    text = "Focus & Line Filters",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                                Text(
+                                                    text = buildString {
+                                                        if (focusModeEnabled) append("Focus: ±${focusContextLines}L")
+                                                        if (focusModeEnabled && hiddenLineKeywords.isNotEmpty()) append(" • ")
+                                                        if (hiddenLineKeywords.isNotEmpty()) append("${hiddenLineKeywords.size} hidden")
+                                                        if (!focusModeEnabled && hiddenLineKeywords.isEmpty()) append("Configure context & line rules")
+                                                    },
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+
+                                        Icon(
+                                            imageVector = Icons.Outlined.ArrowForwardIos,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
                                                 showSettingsDialog = true
                                                 showMenu = false
                                             }
@@ -759,6 +887,64 @@ fun FileCompareScreen(
                         ) {
                             Icon(imageVector = Icons.Default.Close, contentDescription = "Close Search")
                         }
+                    }
+                }
+            }
+
+            // Active Filter Sub-Banner (Displays when Focus Mode or Hide Lines is active)
+            AnimatedVisibility(visible = !fileItem.relativePath.lowercase().endsWith(".dex") && (focusModeEnabled || hiddenLineKeywords.isNotEmpty())) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showFocusFilterDialog = true }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.VisibilityOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = buildString {
+                                    if (focusModeEnabled) append("Focus Mode (±${focusContextLines} lines)")
+                                    if (focusModeEnabled && hiddenLineKeywords.isNotEmpty()) append(" • ")
+                                    if (hiddenLineKeywords.isNotEmpty()) {
+                                        append("${hiddenLineKeywords.size} hidden line rule${if (hiddenLineKeywords.size > 1) "s" else ""}")
+                                        val sample = hiddenLineKeywords.firstOrNull()
+                                        if (sample != null) {
+                                            append(" (\"$sample\"${if (hiddenLineKeywords.size > 1) ", ..." else ""})")
+                                        }
+                                    }
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Text(
+                            text = "Adjust",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
                     }
                 }
             }
@@ -961,7 +1147,7 @@ fun FileCompareScreen(
                     // Code diff rendering view
                     if (viewMode == DiffViewMode.UNIFIED) {
                         UnifiedDiffView(
-                            diffLines = diffLines,
+                            diffLines = effectiveDiffLines,
                             filename = fileItem.relativePath,
                             searchQuery = fileSearchQuery,
                             listState = listState,
@@ -975,7 +1161,7 @@ fun FileCompareScreen(
                         )
                     } else {
                         SplitDiffView(
-                            diffLines = diffLines,
+                            diffLines = effectiveDiffLines,
                             filename = fileItem.relativePath,
                             searchQuery = fileSearchQuery,
                             listState = listState,
@@ -1155,6 +1341,21 @@ fun FileCompareScreen(
                     Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                 }
             }
+        )
+    }
+
+    // Focus Mode & Line Filter Dialog
+    if (showFocusFilterDialog) {
+        FocusAndFilterDialog(
+            focusModeEnabled = focusModeEnabled,
+            focusContextLines = focusContextLines,
+            hiddenKeywords = hiddenLineKeywords,
+            onToggleFocusMode = { viewModel.setFocusModeEnabled(it) },
+            onSetFocusContextLines = { viewModel.setFocusContextLines(it) },
+            onAddHiddenKeyword = { viewModel.addHiddenLineKeyword(it) },
+            onRemoveHiddenKeyword = { viewModel.removeHiddenLineKeyword(it) },
+            onClearHiddenKeywords = { viewModel.clearHiddenLineKeywords() },
+            onDismiss = { showFocusFilterDialog = false }
         )
     }
 
