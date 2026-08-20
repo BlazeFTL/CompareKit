@@ -4,11 +4,18 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 
+data class DexAnnotationData(
+    val visibility: String,
+    val type: String,
+    val elements: Map<String, String> = emptyMap()
+)
+
 data class DexFieldData(
     val name: String,
     val typeName: String,
     val accessFlags: Int,
-    val initialValue: String? = null
+    val initialValue: String? = null,
+    val annotations: List<DexAnnotationData> = emptyList()
 )
 
 data class DexMethodData(
@@ -18,7 +25,8 @@ data class DexMethodData(
     val codeHash: String,
     val registersCount: Int = 0,
     val instructions: List<String> = emptyList(),
-    val codeOff: Int = 0
+    val codeOff: Int = 0,
+    val annotations: List<DexAnnotationData> = emptyList()
 )
 
 data class DexClass(
@@ -29,6 +37,7 @@ data class DexClass(
     val methods: List<DexMethodData>,
     val signature: String,
     val accessFlags: Int = 0,
+    val annotations: List<DexAnnotationData> = emptyList(),
     val dexBytes: ByteArray? = null,
     val fieldIdsOff: Int = 0,
     val methodIdsOff: Int = 0
@@ -136,6 +145,16 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
     for (iface in this.interfaceNames) {
         sb.append(".implements ").append(toDescriptor(iface)).append("\n")
     }
+
+    if (this.annotations.isNotEmpty()) {
+        for (ann in this.annotations) {
+            sb.append(".annotation ").append(ann.visibility).append(" ").append(ann.type).append("\n")
+            for ((k, v) in ann.elements) {
+                sb.append("    ").append(k).append(" = ").append(v).append("\n")
+            }
+            sb.append(".end annotation\n")
+        }
+    }
     sb.append("\n")
 
     var staticFields = this.fields.filter { it.accessFlags and 0x0008 != 0 }
@@ -149,7 +168,6 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
     var methodsList = fullMethods
 
     if (options.ignoreCompilationOptimizations) {
-        // Filter out synthetic (0x1000) elements
         staticFields = staticFields.filter { (it.accessFlags and 0x1000) == 0 }.sortedBy { it.name }
         instanceFields = instanceFields.filter { (it.accessFlags and 0x1000) == 0 }.sortedBy { it.name }
         methodsList = methodsList.filter { (it.accessFlags and 0x1000) == 0 && (it.accessFlags and 0x0040) == 0 }.sortedBy { it.name + it.signature }
@@ -165,6 +183,13 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
                 sb.append(" = ").append(f.initialValue)
             }
             sb.append("\n")
+            for (ann in f.annotations) {
+                sb.append("    .annotation ").append(ann.visibility).append(" ").append(ann.type).append("\n")
+                for ((k, v) in ann.elements) {
+                    sb.append("        ").append(k).append(" = ").append(v).append("\n")
+                }
+                sb.append("    .end annotation\n")
+            }
         }
         sb.append("\n")
     }
@@ -174,6 +199,13 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
         for (f in instanceFields) {
             val mods = formatAccessFlags(f.accessFlags)
             sb.append(".field ").append(mods).append(" ").append(f.name).append(":").append(toDescriptor(f.typeName)).append("\n")
+            for (ann in f.annotations) {
+                sb.append("    .annotation ").append(ann.visibility).append(" ").append(ann.type).append("\n")
+                for ((k, v) in ann.elements) {
+                    sb.append("        ").append(k).append(" = ").append(v).append("\n")
+                }
+                sb.append("    .end annotation\n")
+            }
         }
         sb.append("\n")
     }
@@ -185,6 +217,13 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
             sb.append(".method ").append(mods).append(" ").append(m.name).append(toSmaliSignature(m.signature)).append("\n")
             if (!options.ignoreRegisterCount && m.registersCount > 0) {
                 sb.append("    .registers ").append(m.registersCount).append("\n")
+            }
+            for (ann in m.annotations) {
+                sb.append("    .annotation ").append(ann.visibility).append(" ").append(ann.type).append("\n")
+                for ((k, v) in ann.elements) {
+                    sb.append("        ").append(k).append(" = ").append(v).append("\n")
+                }
+                sb.append("    .end annotation\n")
             }
             if (m.instructions.isNotEmpty()) {
                 for (insn in m.instructions) {
@@ -199,371 +238,150 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
     return sb.toString().trim()
 }
 
+class DexBuffer(val bytes: ByteArray) {
+    fun readByte(offset: Int): Byte {
+        if (offset < 0 || offset >= bytes.size) return 0
+        return bytes[offset]
+    }
+
+    fun readUShort(offset: Int): Int {
+        if (offset < 0 || offset + 1 >= bytes.size) return 0
+        return (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8)
+    }
+
+    fun readUInt(offset: Int): Int {
+        if (offset < 0 || offset + 3 >= bytes.size) return 0
+        return (bytes[offset].toInt() and 0xFF) or
+                ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
+                ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
+                ((bytes[offset + 3].toInt() and 0xFF) shl 24)
+    }
+
+    fun readUleb128Packed(offset: Int): Long {
+        var result = 0
+        var shift = 0
+        var index = offset
+        val size = bytes.size
+        var b: Int
+        while (index < size) {
+            b = bytes[index].toInt() and 0xFF
+            index++
+            result = result or ((b and 0x7F) shl shift)
+            if ((b and 0x80) == 0) {
+                val bytesConsumed = index - offset
+                return (result.toLong() and 0xFFFFFFFFL) or (bytesConsumed.toLong() shl 32)
+            }
+            shift += 7
+            if (shift > 35) break
+        }
+        return (result.toLong() and 0xFFFFFFFFL) or (1L shl 32)
+    }
+
+    fun readSleb128(offset: Int): Pair<Int, Int> {
+        var result = 0
+        var shift = 0
+        var index = offset
+        val size = bytes.size
+        var b: Int
+        while (index < size) {
+            b = bytes[index].toInt() and 0xFF
+            index++
+            result = result or ((b and 0x7F) shl shift)
+            shift += 7
+            if ((b and 0x80) == 0) {
+                if (shift < 32 && (b and 0x40) != 0) {
+                    result = result or (-(1 shl shift))
+                }
+                break
+            }
+            if (shift > 35) break
+        }
+        return Pair(result, (index - offset).coerceAtLeast(1))
+    }
+
+    fun readString(offset: Int): String {
+        if (offset < 0 || offset >= bytes.size) return ""
+        val p = readUleb128Packed(offset)
+        var strOffset = offset + (p ushr 32).toInt()
+        val start = strOffset
+        val size = bytes.size
+        while (strOffset < size && bytes[strOffset] != 0.toByte()) {
+            strOffset++
+        }
+        if (strOffset > start) {
+            return try {
+                String(bytes, start, strOffset - start, Charsets.UTF_8)
+            } catch (e: Exception) {
+                ""
+            }
+        }
+        return ""
+    }
+}
+
 object DexParser {
-
-    private fun md5(input: String): String {
-        return try {
-            val md = MessageDigest.getInstance("MD5")
-            val digest = md.digest(input.toByteArray(Charsets.UTF_8))
-            digest.joinToString("") { "%02x".format(it) }
-        } catch (e: Exception) {
-            input.hashCode().toString()
-        }
-    }
-
-    private fun md5(bytes: ByteArray): String {
-        return try {
-            val md = MessageDigest.getInstance("MD5")
-            val digest = md.digest(bytes)
-            digest.joinToString("") { "%02x".format(it) }
-        } catch (e: Exception) {
-            bytes.contentHashCode().toString()
-        }
-    }
-
-    fun normalizeInstructions(instructions: List<String>): List<String> {
-        // 1. Strip debug and line-number ops
-        val filtered = instructions.filter { line ->
-            val trimmed = line.trim()
-            !(trimmed.startsWith(".") && (
-                trimmed.startsWith(".line") ||
-                trimmed.startsWith(".local") ||
-                trimmed.startsWith(".end local") ||
-                trimmed.startsWith(".prologue") ||
-                trimmed.startsWith(".epilogue") ||
-                trimmed.startsWith(".param") ||
-                trimmed.startsWith(".parameter")
-            ))
-        }
-
-        // 2. Normalize label names to sequential indices (e.g. :label_0, :label_1)
-        val labelRegex = ":label_\\d+".toRegex()
-        val seenLabels = mutableMapOf<String, String>()
-        var labelCounter = 0
-
-        // Find all label references/declarations to build a sequential mapping
-        for (line in filtered) {
-            val matches = labelRegex.findAll(line)
-            for (match in matches) {
-                val label = match.value
-                if (!seenLabels.containsKey(label)) {
-                    seenLabels[label] = ":label_$labelCounter"
-                    labelCounter++
-                }
-            }
-        }
-
-        // Replace labels with normalized names
-        return filtered.map { line ->
-            var newLine = line
-            val matches = labelRegex.findAll(line).toList().reversed()
-            for (match in matches) {
-                val label = match.value
-                val norm = seenLabels[label] ?: label
-                newLine = newLine.substring(0, match.range.first) + norm + newLine.substring(match.range.last + 1)
-            }
-            newLine
-        }
-    }
-
-    fun preprocessSmali(lines: List<String>, options: DexCompareOptions): List<String> {
-        val filtered = mutableListOf<String>()
-        for (line in lines) {
-            val trimmed = line.trim()
-            
-            // 1. Ignore debug info
-            if (options.ignoreDebugInfo) {
-                if (trimmed.startsWith(".") && (
-                    trimmed.startsWith(".line") ||
-                    trimmed.startsWith(".local") ||
-                    trimmed.startsWith(".end local") ||
-                    trimmed.startsWith(".prologue") ||
-                    trimmed.startsWith(".epilogue") ||
-                    trimmed.startsWith(".param") ||
-                    trimmed.startsWith(".parameter")
-                )) {
-                    continue
-                }
-            }
-            
-            // 2. Ignore register count
-            if (options.ignoreRegisterCount) {
-                if (trimmed.startsWith(".registers") || trimmed.startsWith(".locals")) {
-                    continue
-                }
-            }
-            
-            // 3. Ignore nop instructions
-            if (options.ignoreNopInstruction) {
-                if (trimmed == "nop") {
-                    continue
-                }
-            }
-            
-            // 4. Ignore compilation optimizations (like synthetic markers)
-            if (options.ignoreCompilationOptimizations) {
-                if (trimmed.contains("synthetic")) {
-                    continue
-                }
-            }
-            
-            var processedLine = line
-            // 5. Ignore field initial/default values
-            if (options.ignoreFieldInitialValues) {
-                val trimmedProcessed = processedLine.trim()
-                if (trimmedProcessed.startsWith(".field")) {
-                    val colonIdx = processedLine.indexOf(':')
-                    if (colonIdx != -1) {
-                        val eqIdx = processedLine.indexOf('=', colonIdx)
-                        if (eqIdx != -1) {
-                            processedLine = processedLine.substring(0, eqIdx).trimEnd()
-                        }
-                    }
-                }
-            }
-            
-            filtered.add(processedLine)
-        }
-
-        return filtered
-    }
-
-
-
-    private const val FNV_PRIME = 1099511628211L
-    private const val FNV_OFFSET_BASIS = -3750763034362895579L
-
-    private fun mixLong(currentHash: Long, v: Long): Long {
-        return (currentHash xor v) * FNV_PRIME
-    }
-
-    private fun mixString(currentHash: Long, s: String): Long {
-        var h = currentHash
-        for (i in 0 until s.length) {
-            h = (h xor s[i].code.toLong()) * FNV_PRIME
-        }
-        return (h xor 0x1FL) * FNV_PRIME
-    }
-
-    private fun computeMethodCodeHash(
-        buffer: DexBuffer,
-        bytes: ByteArray,
-        codeOff: Int,
-        resolveString: (Int) -> String,
-        resolveType: (Int) -> String,
-        resolveField: (Int) -> DexFieldData,
-        resolveMethod: (Int) -> DexMethodData,
-        fieldIdsOff: Int,
-        methodIdsOff: Int,
-        options: DexCompareOptions
-    ): String {
-        if (codeOff == 0) return ""
-        return try {
-            val insnsSize = buffer.readUInt(codeOff + 12)
-            if (insnsSize <= 0 || codeOff + 16 + insnsSize * 2 > bytes.size) return ""
-
-            var hash = FNV_OFFSET_BASIS
-
-            var pc = 0
-            while (pc < insnsSize) {
-                val offset = pc
-                val insn = buffer.readUShort(codeOff + 16 + pc * 2)
-                val opcode = insn and 0xFF
-                val len = getOpcodeLength(opcode)
-                if (len <= 0 || pc + len > insnsSize) break
-
-                if (opcode == 0x00 && options.ignoreNopInstruction) {
-                    pc += len
-                    continue
-                }
-
-                hash = mixLong(hash, opcode.toLong())
-
-                when (len) {
-                    1 -> {
-                        when (opcode) {
-                            0x00, 0x0e -> {}
-                            0x01, 0x04, 0x07, 0x12, 0x21, in 0x7b..0x8f, in 0xb0..0xcf -> {
-                                val a = (insn ushr 8) and 0xF
-                                val b = (insn ushr 12) and 0xF
-                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
-                            }
-                            0x28 -> { // goto (relative branch)
-                                var a = (insn ushr 8) and 0xFF
-                                if (a > 127) a -= 256
-                                hash = mixLong(hash, (offset + a).toLong())
-                            }
-                            else -> {
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, a.toLong())
-                            }
-                        }
-                    }
-                    2 -> {
-                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
-                        when (opcode) {
-                            0x1a -> { // const-string
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixString(hash, resolveString(insn2))
-                            }
-                            0x1c, 0x1f, 0x22 -> { // const-class, check-cast, new-instance
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixString(hash, resolveType(insn2))
-                            }
-                            0x20, 0x23 -> { // instance-of, new-array
-                                val a = (insn ushr 8) and 0xF
-                                val b = (insn ushr 12) and 0xF
-                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
-                                hash = mixString(hash, resolveType(insn2))
-                            }
-                            0x29 -> { // goto/16
-                                val a = insn2.toShort().toInt()
-                                hash = mixLong(hash, (offset + a).toLong())
-                            }
-                            in 0x32..0x37 -> { // if-test
-                                val a = (insn ushr 8) and 0xF
-                                val b = (insn ushr 12) and 0xF
-                                val c = insn2.toShort().toInt()
-                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
-                                hash = mixLong(hash, (offset + c).toLong())
-                            }
-                            in 0x38..0x3d -> { // if-testz
-                                val a = (insn ushr 8) and 0xFF
-                                val b = insn2.toShort().toInt()
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixLong(hash, (offset + b).toLong())
-                            }
-                            in 0x52..0x58, in 0x59..0x5f -> { // iget/iput
-                                val a = (insn ushr 8) and 0xF
-                                val b = (insn ushr 12) and 0xF
-                                val c = insn2
-                                val classIdx = buffer.readUShort(fieldIdsOff + c * 8)
-                                val f = resolveField(c)
-                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
-                                hash = mixString(hash, resolveType(classIdx))
-                                hash = mixString(hash, f.name)
-                                hash = mixString(hash, toDescriptor(f.typeName))
-                            }
-                            in 0x60..0x66, in 0x67..0x6d -> { // sget/sput
-                                val a = (insn ushr 8) and 0xFF
-                                val b = insn2
-                                val classIdx = buffer.readUShort(fieldIdsOff + b * 8)
-                                val f = resolveField(b)
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixString(hash, resolveType(classIdx))
-                                hash = mixString(hash, f.name)
-                                hash = mixString(hash, toDescriptor(f.typeName))
-                            }
-                            else -> {
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, ((a.toLong() shl 16) or (insn2.toLong() and 0xFFFFL)))
-                            }
-                        }
-                    }
-                    3 -> {
-                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
-                        val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2)
-                        when (opcode) {
-                            0x1b -> { // const-string/jumbo
-                                val a = (insn ushr 8) and 0xFF
-                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixString(hash, resolveString(b))
-                            }
-                            0x2a -> { // goto/32
-                                val a = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                hash = mixLong(hash, (offset + a).toLong())
-                            }
-                            0x2b, 0x2c -> { // packed-switch, sparse-switch
-                                val a = (insn ushr 8) and 0xFF
-                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixLong(hash, (offset + b).toLong())
-                            }
-                            in 0x6e..0x72 -> { // invoke-kind
-                                val count = (insn ushr 12) and 0xF
-                                val methIdx = insn2
-                                val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
-                                val m = resolveMethod(methIdx)
-                                
-                                val reg5 = (insn ushr 8) and 0xF
-                                val reg1 = insn3 and 0xF
-                                val reg2 = (insn3 ushr 4) and 0xF
-                                val reg3 = (insn3 ushr 8) and 0xF
-                                val reg4 = (insn3 ushr 12) and 0xF
-                                
-                                var regBits = 0L
-                                if (count >= 1) regBits = regBits or (reg1.toLong() shl 0)
-                                if (count >= 2) regBits = regBits or (reg2.toLong() shl 4)
-                                if (count >= 3) regBits = regBits or (reg3.toLong() shl 8)
-                                if (count >= 4) regBits = regBits or (reg4.toLong() shl 12)
-                                if (count >= 5) regBits = regBits or (reg5.toLong() shl 16)
-
-                                hash = mixLong(hash, ((count.toLong() shl 20) or regBits))
-                                hash = mixString(hash, resolveType(classIdx))
-                                hash = mixString(hash, m.name)
-                                hash = mixString(hash, m.signature)
-                            }
-                            in 0x74..0x78 -> { // invoke-kind/range
-                                val count = (insn ushr 8) and 0xFF
-                                val methIdx = insn2
-                                val startReg = insn3
-                                val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
-                                val m = resolveMethod(methIdx)
-                                hash = mixLong(hash, ((count.toLong() shl 16) or (startReg.toLong() and 0xFFFFL)))
-                                hash = mixString(hash, resolveType(classIdx))
-                                hash = mixString(hash, m.name)
-                                hash = mixString(hash, m.signature)
-                            }
-                            else -> {
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixLong(hash, insn2.toLong())
-                                hash = mixLong(hash, insn3.toLong())
-                            }
-                        }
-                    }
-                    5 -> {
-                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2).toLong() and 0xFFFFL
-                        val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2).toLong() and 0xFFFFL
-                        val insn4 = buffer.readUShort(codeOff + 16 + (pc + 3) * 2).toLong() and 0xFFFFL
-                        val insn5 = buffer.readUShort(codeOff + 16 + (pc + 4) * 2).toLong() and 0xFFFFL
-                        val a = (insn ushr 8) and 0xFF
-                        val v = insn2 or (insn3 shl 16) or (insn4 shl 32) or (insn5 shl 48)
-                        hash = mixLong(hash, a.toLong())
-                        hash = mixLong(hash, v)
-                    }
-                    else -> {
-                        hash = mixLong(hash, insn.toLong())
-                    }
-                }
-                pc += len
-            }
-            java.lang.Long.toHexString(hash)
-        } catch (e: Exception) {
-            ""
-        }
-    }
 
     private fun getOpcodeLength(opcode: Int): Int {
         return when (opcode) {
-            0x00, 0x01, 0x04, 0x07, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x1d, 0x1e, 0x21, 0x27, 0x28 -> 1
-            in 0x7b..0x8f -> 1
-            in 0xb0..0xcf -> 1
-            
-            0x02, 0x05, 0x08, 0x13, 0x15, 0x16, 0x19, 0x1a, 0x1c, 0x1f, 0x20, 0x22, 0x23, 0x29 -> 2
-            in 0x2d..0x3d -> 2
-            in 0x44..0x6d -> 2
-            in 0x90..0xaf -> 2
-            in 0xd0..0xe2 -> 2
-            
-            0x03, 0x06, 0x09, 0x14, 0x17, 0x1b, 0x24, 0x25, 0x2a, 0x2b, 0x2c -> 3
+            0x00 -> 1
+            0x01 -> 1
+            0x02 -> 2
+            0x03 -> 3
+            0x04 -> 1
+            0x05 -> 2
+            0x06 -> 3
+            0x07 -> 1
+            0x08 -> 2
+            0x09 -> 3
+            0x0a -> 1
+            0x0b -> 1
+            0x0c -> 1
+            0x0d -> 1
+            0x0e -> 1
+            0x0f -> 1
+            0x10 -> 1
+            0x11 -> 1
+            0x12 -> 1
+            0x13 -> 2
+            0x14 -> 3
+            0x15 -> 2
+            0x16 -> 2
+            0x17 -> 3
+            0x18 -> 5
+            0x19 -> 2
+            0x1a -> 2
+            0x1b -> 3
+            0x1c -> 2
+            0x1d -> 1
+            0x1e -> 1
+            0x1f -> 2
+            0x20 -> 2
+            0x21 -> 1
+            0x22 -> 2
+            0x23 -> 2
+            0x24 -> 3
+            0x25 -> 3
+            0x26 -> 3
+            0x27 -> 1
+            0x28 -> 1
+            0x29 -> 2
+            0x2a -> 3
+            0x2b -> 3
+            0x2c -> 3
+            in 0x2d..0x31 -> 2
+            in 0x32..0x37 -> 2
+            in 0x38..0x3d -> 2
+            in 0x44..0x51 -> 2
+            in 0x52..0x5f -> 2
+            in 0x60..0x6d -> 2
             in 0x6e..0x72 -> 3
             in 0x74..0x78 -> 3
-            
-            0x18 -> 5
+            in 0x7b..0x8f -> 1
+            in 0x90..0xaf -> 2
+            in 0xb0..0xcf -> 1
+            in 0xd0..0xd7 -> 2
+            in 0xd8..0xe2 -> 2
+            in 0xfa..0xfb -> 1
             else -> 1
         }
     }
@@ -788,8 +606,436 @@ object DexParser {
             0xe0 -> "shl-int/lit8"
             0xe1 -> "shr-int/lit8"
             0xe2 -> "ushr-int/lit8"
-            
             else -> "op_${String.format("%02x", opcode)}"
+        }
+    }
+
+    private inline fun mixLong(hash: Long, v: Long): Long {
+        return (hash xor v) * 1099511628211L
+    }
+
+    private inline fun mixString(hash: Long, s: String): Long {
+        var h = hash
+        val len = s.length
+        for (i in 0 until len) {
+            h = (h xor s[i].code.toLong()) * 1099511628211L
+        }
+        return h
+    }
+
+    private fun computeMethodCodeHash(
+        buffer: DexBuffer,
+        bytes: ByteArray,
+        codeOff: Int,
+        resolveString: (Int) -> String,
+        resolveType: (Int) -> String,
+        resolveField: (Int) -> DexFieldData,
+        resolveMethod: (Int) -> DexMethodData,
+        fieldIdsOff: Int,
+        fieldIdsSize: Int,
+        methodIdsOff: Int,
+        methodIdsSize: Int,
+        options: DexCompareOptions
+    ): String {
+        if (codeOff == 0) return ""
+        return try {
+            val insnsSize = buffer.readUInt(codeOff + 12)
+            if (insnsSize <= 0 || codeOff + 16 + insnsSize * 2 > bytes.size) return ""
+
+            var hash = -3750763034362895579L // FNV offset basis
+
+            if (!options.ignoreRegisterCount) {
+                val registersSize = buffer.readUShort(codeOff)
+                hash = mixLong(hash, registersSize.toLong())
+            }
+
+            var pc = 0
+            while (pc < insnsSize) {
+                val offset = pc
+                val insn = buffer.readUShort(codeOff + 16 + pc * 2)
+
+                // Check for payload markers: 0x0100 (packed-switch), 0x0200 (sparse-switch), 0x0300 (fill-array-data)
+                if (insn == 0x0100) { // PACKED_SWITCH_PAYLOAD
+                    val size = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                    val firstKey = buffer.readUInt(codeOff + 16 + (pc + 2) * 2)
+                    hash = mixLong(hash, 0x0100L)
+                    hash = mixLong(hash, size.toLong())
+                    hash = mixLong(hash, firstKey.toLong())
+                    for (i in 0 until size) {
+                        val target = buffer.readUInt(codeOff + 16 + (pc + 4 + i * 2) * 2)
+                        hash = mixLong(hash, target.toLong())
+                    }
+                    pc += (size * 2) + 4
+                    continue
+                } else if (insn == 0x0200) { // SPARSE_SWITCH_PAYLOAD
+                    val size = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                    hash = mixLong(hash, 0x0200L)
+                    hash = mixLong(hash, size.toLong())
+                    for (i in 0 until size) {
+                        val key = buffer.readUInt(codeOff + 16 + (pc + 2 + i * 2) * 2)
+                        val target = buffer.readUInt(codeOff + 16 + (pc + 2 + size * 2 + i * 2) * 2)
+                        hash = mixLong(hash, key.toLong())
+                        hash = mixLong(hash, target.toLong())
+                    }
+                    pc += (size * 4) + 2
+                    continue
+                } else if (insn == 0x0300) { // FILL_ARRAY_DATA_PAYLOAD
+                    val elemWidth = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                    val size = buffer.readUInt(codeOff + 16 + (pc + 2) * 2)
+                    hash = mixLong(hash, 0x0300L)
+                    hash = mixLong(hash, elemWidth.toLong())
+                    hash = mixLong(hash, size.toLong())
+                    val dataWords = (size * elemWidth + 1) / 2
+                    for (i in 0 until dataWords) {
+                        val w = buffer.readUShort(codeOff + 16 + (pc + 4 + i) * 2)
+                        hash = mixLong(hash, w.toLong())
+                    }
+                    pc += dataWords + 4
+                    continue
+                }
+
+                val opcode = insn and 0xFF
+                val len = getOpcodeLength(opcode)
+                if (len <= 0 || pc + len > insnsSize) break
+
+                if (opcode == 0x00 && options.ignoreNopInstruction) {
+                    pc += len
+                    continue
+                }
+
+                hash = mixLong(hash, opcode.toLong())
+
+                when (len) {
+                    1 -> {
+                        val a = (insn ushr 8) and 0xFF
+                        hash = mixLong(hash, a.toLong())
+                    }
+                    2 -> {
+                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                        when (opcode) {
+                            0x1a -> { // const-string
+                                val a = (insn ushr 8) and 0xFF
+                                hash = mixLong(hash, a.toLong())
+                                hash = mixString(hash, resolveString(insn2))
+                            }
+                            0x1c, 0x1f, 0x22 -> { // const-class, check-cast, new-instance
+                                val a = (insn ushr 8) and 0xFF
+                                hash = mixLong(hash, a.toLong())
+                                hash = mixString(hash, resolveType(insn2))
+                            }
+                            0x20, 0x23 -> { // instance-of, new-array
+                                val a = (insn ushr 8) and 0xF
+                                val b = (insn ushr 12) and 0xF
+                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
+                                hash = mixString(hash, resolveType(insn2))
+                            }
+                            0x29 -> { // goto/16
+                                val a = insn2.toShort().toInt()
+                                hash = mixLong(hash, (offset + a).toLong())
+                            }
+                            in 0x32..0x37 -> { // if-test
+                                val a = (insn ushr 8) and 0xF
+                                val b = (insn ushr 12) and 0xF
+                                val c = insn2.toShort().toInt()
+                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
+                                hash = mixLong(hash, (offset + c).toLong())
+                            }
+                            in 0x38..0x3d -> { // if-testz
+                                val a = (insn ushr 8) and 0xFF
+                                val b = insn2.toShort().toInt()
+                                hash = mixLong(hash, a.toLong())
+                                hash = mixLong(hash, (offset + b).toLong())
+                            }
+                            in 0x52..0x58, in 0x59..0x5f -> { // iget/iput
+                                val a = (insn ushr 8) and 0xF
+                                val b = (insn ushr 12) and 0xF
+                                val c = insn2
+                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
+                                if (c in 0 until fieldIdsSize) {
+                                    val classIdx = buffer.readUShort(fieldIdsOff + c * 8)
+                                    val f = resolveField(c)
+                                    hash = mixString(hash, resolveType(classIdx))
+                                    hash = mixString(hash, f.name)
+                                    hash = mixString(hash, toDescriptor(f.typeName))
+                                } else {
+                                    hash = mixLong(hash, c.toLong())
+                                }
+                            }
+                            in 0x60..0x66, in 0x67..0x6d -> { // sget/sput
+                                val a = (insn ushr 8) and 0xFF
+                                val b = insn2
+                                hash = mixLong(hash, a.toLong())
+                                if (b in 0 until fieldIdsSize) {
+                                    val classIdx = buffer.readUShort(fieldIdsOff + b * 8)
+                                    val f = resolveField(b)
+                                    hash = mixString(hash, resolveType(classIdx))
+                                    hash = mixString(hash, f.name)
+                                    hash = mixString(hash, toDescriptor(f.typeName))
+                                } else {
+                                    hash = mixLong(hash, b.toLong())
+                                }
+                            }
+                            else -> {
+                                val a = (insn ushr 8) and 0xFF
+                                hash = mixLong(hash, ((a.toLong() shl 16) or (insn2.toLong() and 0xFFFFL)))
+                            }
+                        }
+                    }
+                    3 -> {
+                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                        val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2)
+                        when (opcode) {
+                            0x1b -> { // const-string/jumbo
+                                val a = (insn ushr 8) and 0xFF
+                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
+                                hash = mixLong(hash, a.toLong())
+                                hash = mixString(hash, resolveString(b))
+                            }
+                            0x2a -> { // goto/32
+                                val a = (insn2 and 0xFFFF) or (insn3 shl 16)
+                                hash = mixLong(hash, (offset + a).toLong())
+                            }
+                            0x2b, 0x2c, 0x26 -> { // switch/array payload target
+                                val a = (insn ushr 8) and 0xFF
+                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
+                                hash = mixLong(hash, a.toLong())
+                                hash = mixLong(hash, (offset + b).toLong())
+                            }
+                            in 0x6e..0x72 -> { // invoke-kind
+                                val count = (insn ushr 12) and 0xF
+                                val methIdx = insn2
+                                val reg5 = (insn ushr 8) and 0xF
+                                val reg1 = insn3 and 0xF
+                                val reg2 = (insn3 ushr 4) and 0xF
+                                val reg3 = (insn3 ushr 8) and 0xF
+                                val reg4 = (insn3 ushr 12) and 0xF
+                                
+                                var regBits = 0L
+                                if (count >= 1) regBits = regBits or (reg1.toLong() shl 0)
+                                if (count >= 2) regBits = regBits or (reg2.toLong() shl 4)
+                                if (count >= 3) regBits = regBits or (reg3.toLong() shl 8)
+                                if (count >= 4) regBits = regBits or (reg4.toLong() shl 12)
+                                if (count >= 5) regBits = regBits or (reg5.toLong() shl 16)
+
+                                hash = mixLong(hash, ((count.toLong() shl 20) or regBits))
+                                if (methIdx in 0 until methodIdsSize) {
+                                    val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
+                                    val m = resolveMethod(methIdx)
+                                    hash = mixString(hash, resolveType(classIdx))
+                                    hash = mixString(hash, m.name)
+                                    hash = mixString(hash, m.signature)
+                                } else {
+                                    hash = mixLong(hash, methIdx.toLong())
+                                }
+                            }
+                            in 0x74..0x78 -> { // invoke-kind/range
+                                val count = (insn ushr 8) and 0xFF
+                                val methIdx = insn2
+                                val startReg = insn3
+                                hash = mixLong(hash, ((count.toLong() shl 16) or (startReg.toLong() and 0xFFFFL)))
+                                if (methIdx in 0 until methodIdsSize) {
+                                    val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
+                                    val m = resolveMethod(methIdx)
+                                    hash = mixString(hash, resolveType(classIdx))
+                                    hash = mixString(hash, m.name)
+                                    hash = mixString(hash, m.signature)
+                                } else {
+                                    hash = mixLong(hash, methIdx.toLong())
+                                }
+                            }
+                            else -> {
+                                val a = (insn ushr 8) and 0xFF
+                                hash = mixLong(hash, a.toLong())
+                                hash = mixLong(hash, insn2.toLong())
+                                hash = mixLong(hash, insn3.toLong())
+                            }
+                        }
+                    }
+                    5 -> {
+                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2).toLong() and 0xFFFFL
+                        val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2).toLong() and 0xFFFFL
+                        val insn4 = buffer.readUShort(codeOff + 16 + (pc + 3) * 2).toLong() and 0xFFFFL
+                        val insn5 = buffer.readUShort(codeOff + 16 + (pc + 4) * 2).toLong() and 0xFFFFL
+                        val a = (insn ushr 8) and 0xFF
+                        val v = insn2 or (insn3 shl 16) or (insn4 shl 32) or (insn5 shl 48)
+                        hash = mixLong(hash, a.toLong())
+                        hash = mixLong(hash, v)
+                    }
+                    else -> {
+                        hash = mixLong(hash, insn.toLong())
+                    }
+                }
+                pc += len
+            }
+
+            // Mix Try/Catch exception handlers if present
+            val triesSize = buffer.readUShort(codeOff + 6)
+            if (triesSize > 0) {
+                hash = mixLong(hash, triesSize.toLong())
+                val padding = if (insnsSize % 2 != 0) 2 else 0
+                val triesOff = codeOff + 16 + insnsSize * 2 + padding
+                val handlersListOff = triesOff + triesSize * 8
+                for (t in 0 until triesSize) {
+                    val startAddr = buffer.readUInt(triesOff + t * 8)
+                    val insnCount = buffer.readUShort(triesOff + t * 8 + 4)
+                    val handlerOff = buffer.readUShort(triesOff + t * 8 + 6)
+                    hash = mixLong(hash, startAddr.toLong())
+                    hash = mixLong(hash, insnCount.toLong())
+                    
+                    val handlerPos = handlersListOff + handlerOff
+                    val (hSize, hSizeLen) = buffer.readSleb128(handlerPos)
+                    var currH = handlerPos + hSizeLen
+                    val pairCount = kotlin.math.abs(hSize)
+                    for (p in 0 until pairCount) {
+                        val pType = buffer.readUleb128Packed(currH)
+                        val typeIdx = (pType and 0xFFFFFFFFL).toInt()
+                        currH += (pType ushr 32).toInt()
+                        val pAddr = buffer.readUleb128Packed(currH)
+                        val addr = (pAddr and 0xFFFFFFFFL).toInt()
+                        currH += (pAddr ushr 32).toInt()
+                        hash = mixString(hash, resolveType(typeIdx))
+                        hash = mixLong(hash, addr.toLong())
+                    }
+                    if (hSize <= 0) {
+                        val pAll = buffer.readUleb128Packed(currH)
+                        val catchAllAddr = (pAll and 0xFFFFFFFFL).toInt()
+                        hash = mixString(hash, "ALL")
+                        hash = mixLong(hash, catchAllAddr.toLong())
+                    }
+                }
+            }
+
+            java.lang.Long.toHexString(hash)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun disassembleClassMethods(cls: DexClass, options: DexCompareOptions = DexCompareOptions()): List<DexMethodData> {
+        val bytes = cls.dexBytes ?: return cls.methods
+        val buffer = DexBuffer(bytes)
+        val stringIdsSize = buffer.readUInt(56)
+        val stringIdsOff = buffer.readUInt(60)
+        val typeIdsSize = buffer.readUInt(64)
+        val typeIdsOff = buffer.readUInt(68)
+        val protoIdsOff = buffer.readUInt(76)
+        val fieldIdsSize = buffer.readUInt(80)
+        val fieldIdsOff = cls.fieldIdsOff
+        val methodIdsSize = buffer.readUInt(88)
+        val methodIdsOff = cls.methodIdsOff
+
+        val stringCache = arrayOfNulls<String>(stringIdsSize)
+        fun resolveString(idx: Int): String {
+            if (idx !in 0 until stringIdsSize) return ""
+            var s = stringCache[idx]
+            if (s == null) {
+                s = try {
+                    val off = buffer.readUInt(stringIdsOff + idx * 4)
+                    buffer.readString(off)
+                } catch (e: Exception) { "" }
+                stringCache[idx] = s
+            }
+            return s
+        }
+
+        val typeCache = arrayOfNulls<String>(typeIdsSize)
+        fun resolveType(idx: Int): String {
+            if (idx !in 0 until typeIdsSize) return ""
+            var t = typeCache[idx]
+            if (t == null) {
+                t = try {
+                    val descriptorIdx = buffer.readUInt(typeIdsOff + idx * 4)
+                    resolveString(descriptorIdx)
+                } catch (e: Exception) { "" }
+                typeCache[idx] = t
+            }
+            return t
+        }
+
+        fun formatDescriptor(desc: String): String {
+            if (desc.isEmpty()) return ""
+            var arrayDepth = 0
+            var curr = desc
+            while (curr.startsWith("[")) {
+                arrayDepth++
+                curr = curr.substring(1)
+            }
+            var baseType = when (curr) {
+                "V" -> "void"
+                "Z" -> "boolean"
+                "B" -> "byte"
+                "S" -> "short"
+                "C" -> "char"
+                "I" -> "int"
+                "J" -> "long"
+                "F" -> "float"
+                "D" -> "double"
+                else -> {
+                    if (curr.startsWith("L") && curr.endsWith(";")) {
+                        curr.substring(1, curr.length - 1).replace('/', '.')
+                    } else {
+                        curr
+                    }
+                }
+            }
+            repeat(arrayDepth) { baseType += "[]" }
+            return baseType
+        }
+
+        fun resolveFormattedType(idx: Int): String = formatDescriptor(resolveType(idx))
+
+        fun resolveField(fieldIdx: Int): DexFieldData {
+            if (fieldIdx !in 0 until fieldIdsSize) return DexFieldData("unknown_field", "void", 0)
+            val typeIdx = buffer.readUShort(fieldIdsOff + fieldIdx * 8 + 2)
+            val nameIdx = buffer.readUInt(fieldIdsOff + fieldIdx * 8 + 4)
+            return DexFieldData(
+                name = resolveString(nameIdx),
+                typeName = resolveFormattedType(typeIdx),
+                accessFlags = 0
+            )
+        }
+
+        fun resolveMethod(methodIdx: Int): DexMethodData {
+            if (methodIdx !in 0 until methodIdsSize) return DexMethodData("unknown_method", "() : void", 0, "")
+            val protoIdx = buffer.readUShort(methodIdsOff + methodIdx * 8 + 2)
+            val nameIdx = buffer.readUInt(methodIdsOff + methodIdx * 8 + 4)
+            val methodName = resolveString(nameIdx)
+
+            val returnTypeIdx = buffer.readUInt(protoIdsOff + protoIdx * 12 + 4)
+            val returnType = resolveFormattedType(returnTypeIdx.toInt())
+
+            val paramsOff = buffer.readUInt(protoIdsOff + protoIdx * 12 + 8)
+            val params = mutableListOf<String>()
+            if (paramsOff != 0) {
+                val size = buffer.readUInt(paramsOff)
+                for (p in 0 until size) {
+                    val typeIdx = buffer.readUShort(paramsOff + 4 + p * 2)
+                    params.add(resolveFormattedType(typeIdx))
+                }
+            }
+            return DexMethodData(methodName, "(${params.joinToString(", ")}) : $returnType", 0, "")
+        }
+
+        return cls.methods.map { m ->
+            if (m.codeOff != 0) {
+                val insns = disassembleMethod(
+                    buffer,
+                    bytes,
+                    m.codeOff,
+                    ::resolveString,
+                    ::resolveType,
+                    ::resolveField,
+                    ::resolveMethod,
+                    fieldIdsOff,
+                    fieldIdsSize,
+                    methodIdsOff,
+                    methodIdsSize,
+                    options
+                )
+                m.copy(instructions = insns)
+            } else {
+                m
+            }
         }
     }
 
@@ -802,29 +1048,53 @@ object DexParser {
         resolveField: (Int) -> DexFieldData,
         resolveMethod: (Int) -> DexMethodData,
         fieldIdsOff: Int,
+        fieldIdsSize: Int,
         methodIdsOff: Int,
+        methodIdsSize: Int,
         options: DexCompareOptions
     ): List<String> {
         if (codeOff == 0) return emptyList()
         val insnsSize = buffer.readUInt(codeOff + 12)
         if (insnsSize <= 0 || codeOff + 16 + insnsSize * 2 > bytes.size) return emptyList()
 
-        // Pass 1: Identify all jump target offsets
+        // Pass 1: Identify all branch & handler target offsets
         val targetPcs = mutableSetOf<Int>()
         var pc = 0
         while (pc < insnsSize) {
             val offset = pc
             val insn = buffer.readUShort(codeOff + 16 + pc * 2)
+
+            if (insn == 0x0100) { // PACKED_SWITCH_PAYLOAD
+                val size = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                for (i in 0 until size) {
+                    val target = buffer.readUInt(codeOff + 16 + (pc + 4 + i * 2) * 2)
+                    targetPcs.add(target)
+                }
+                pc += (size * 2) + 4
+                continue
+            } else if (insn == 0x0200) { // SPARSE_SWITCH_PAYLOAD
+                val size = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                for (i in 0 until size) {
+                    val target = buffer.readUInt(codeOff + 16 + (pc + 2 + size * 2 + i * 2) * 2)
+                    targetPcs.add(target)
+                }
+                pc += (size * 4) + 2
+                continue
+            } else if (insn == 0x0300) { // FILL_ARRAY_DATA_PAYLOAD
+                val elemWidth = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                val size = buffer.readUInt(codeOff + 16 + (pc + 2) * 2)
+                pc += (size * elemWidth + 1) / 2 + 4
+                continue
+            }
+
             val opcode = insn and 0xFF
             val len = getOpcodeLength(opcode)
-            if (len <= 0 || pc + len > insnsSize) {
-                break
-            }
+            if (len <= 0 || pc + len > insnsSize) break
 
             try {
                 when (len) {
                     1 -> {
-                        if (opcode == 0x28) { // goto
+                        if (opcode == 0x28) {
                             var a = (insn ushr 8) and 0xFF
                             if (a > 127) a -= 256
                             targetPcs.add(offset + a)
@@ -833,15 +1103,15 @@ object DexParser {
                     2 -> {
                         val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
                         when (opcode) {
-                            0x29 -> { // goto/16
+                            0x29 -> {
                                 val a = insn2.toShort().toInt()
                                 targetPcs.add(offset + a)
                             }
-                            in 0x32..0x37 -> { // if-test
+                            in 0x32..0x37 -> {
                                 val c = insn2.toShort().toInt()
                                 targetPcs.add(offset + c)
                             }
-                            in 0x38..0x3d -> { // if-testz
+                            in 0x38..0x3d -> {
                                 val b = insn2.toShort().toInt()
                                 targetPcs.add(offset + b)
                             }
@@ -851,24 +1121,60 @@ object DexParser {
                         val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
                         val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2)
                         when (opcode) {
-                            0x2a -> { // goto/32
+                            0x2a -> {
                                 val a = (insn2 and 0xFFFF) or (insn3 shl 16)
                                 targetPcs.add(offset + a)
                             }
-                            0x2b, 0x2c -> { // packed-switch, sparse-switch
+                            0x2b, 0x2c, 0x26 -> {
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
                                 targetPcs.add(offset + b)
                             }
                         }
                     }
                 }
-            } catch (e: Exception) {
-                // Ignore parsing errors during pre-scan
-            }
+            } catch (e: Exception) {}
             pc += len
         }
 
-        // Pass 2: Disassemble instructions and inject labels
+        // Add try/catch targets
+        val triesSize = buffer.readUShort(codeOff + 6)
+        val catchDirectives = mutableListOf<String>()
+        if (triesSize > 0) {
+            val padding = if (insnsSize % 2 != 0) 2 else 0
+            val triesOff = codeOff + 16 + insnsSize * 2 + padding
+            val handlersListOff = triesOff + triesSize * 8
+            for (t in 0 until triesSize) {
+                val startAddr = buffer.readUInt(triesOff + t * 8)
+                val insnCount = buffer.readUShort(triesOff + t * 8 + 4)
+                val handlerOff = buffer.readUShort(triesOff + t * 8 + 6)
+                targetPcs.add(startAddr)
+                targetPcs.add(startAddr + insnCount)
+
+                val handlerPos = handlersListOff + handlerOff
+                val (hSize, hSizeLen) = buffer.readSleb128(handlerPos)
+                var currH = handlerPos + hSizeLen
+                val pairCount = kotlin.math.abs(hSize)
+                for (p in 0 until pairCount) {
+                    val pType = buffer.readUleb128Packed(currH)
+                    val typeIdx = (pType and 0xFFFFFFFFL).toInt()
+                    currH += (pType ushr 32).toInt()
+                    val pAddr = buffer.readUleb128Packed(currH)
+                    val addr = (pAddr and 0xFFFFFFFFL).toInt()
+                    currH += (pAddr ushr 32).toInt()
+                    targetPcs.add(addr)
+                    val expType = resolveType(typeIdx)
+                    catchDirectives.add(".catch $expType {:label_$startAddr .. :label_${startAddr + insnCount}} :label_$addr")
+                }
+                if (hSize <= 0) {
+                    val pAll = buffer.readUleb128Packed(currH)
+                    val catchAllAddr = (pAll and 0xFFFFFFFFL).toInt()
+                    targetPcs.add(catchAllAddr)
+                    catchDirectives.add(".catchall {:label_$startAddr .. :label_${startAddr + insnCount}} :label_$catchAllAddr")
+                }
+            }
+        }
+
+        // Pass 2: Disassemble instructions and payloads
         val instructions = mutableListOf<String>()
         pc = 0
         while (pc < insnsSize) {
@@ -877,6 +1183,43 @@ object DexParser {
                 instructions.add(":label_$offset")
             }
             val insn = buffer.readUShort(codeOff + 16 + pc * 2)
+
+            if (insn == 0x0100) { // PACKED_SWITCH_PAYLOAD
+                val size = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                val firstKey = buffer.readUInt(codeOff + 16 + (pc + 2) * 2)
+                instructions.add(".packed-switch 0x${Integer.toHexString(firstKey)}")
+                for (i in 0 until size) {
+                    val target = buffer.readUInt(codeOff + 16 + (pc + 4 + i * 2) * 2)
+                    instructions.add("    :label_$target")
+                }
+                instructions.add(".end packed-switch")
+                pc += (size * 2) + 4
+                continue
+            } else if (insn == 0x0200) { // SPARSE_SWITCH_PAYLOAD
+                val size = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                instructions.add(".sparse-switch")
+                for (i in 0 until size) {
+                    val key = buffer.readUInt(codeOff + 16 + (pc + 2 + i * 2) * 2)
+                    val target = buffer.readUInt(codeOff + 16 + (pc + 2 + size * 2 + i * 2) * 2)
+                    instructions.add("    0x${Integer.toHexString(key)} -> :label_$target")
+                }
+                instructions.add(".end sparse-switch")
+                pc += (size * 4) + 2
+                continue
+            } else if (insn == 0x0300) { // FILL_ARRAY_DATA_PAYLOAD
+                val elemWidth = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                val size = buffer.readUInt(codeOff + 16 + (pc + 2) * 2)
+                instructions.add(".array-data $elemWidth")
+                val dataWords = (size * elemWidth + 1) / 2
+                for (i in 0 until dataWords) {
+                    val w = buffer.readUShort(codeOff + 16 + (pc + 4 + i) * 2)
+                    instructions.add("    0x${String.format("%04x", w)}")
+                }
+                instructions.add(".end array-data")
+                pc += dataWords + 4
+                continue
+            }
+
             val opcode = insn and 0xFF
             val name = getOpcodeName(opcode)
             val len = getOpcodeLength(opcode)
@@ -992,35 +1335,28 @@ object DexParser {
                                 val c = insn2 ushr 8
                                 "$name v$a, v$b, v$c"
                             }
-                            in 0x52..0x58 -> {
+                            in 0x52..0x58, in 0x59..0x5f -> {
                                 val a = (insn ushr 8) and 0xF
                                 val b = (insn ushr 12) and 0xF
                                 val c = insn2
-                                val classIdx = buffer.readUShort(fieldIdsOff + c * 8)
-                                val f = resolveField(c)
-                                "$name v$a, v$b, ${resolveType(classIdx)}->${f.name}:${toDescriptor(f.typeName)}"
+                                if (c in 0 until fieldIdsSize) {
+                                    val classIdx = buffer.readUShort(fieldIdsOff + c * 8)
+                                    val f = resolveField(c)
+                                    "$name v$a, v$b, ${resolveType(classIdx)}->${f.name}:${toDescriptor(f.typeName)}"
+                                } else {
+                                    "$name v$a, v$b, field@$c"
+                                }
                             }
-                            in 0x59..0x5f -> {
-                                val a = (insn ushr 8) and 0xF
-                                val b = (insn ushr 12) and 0xF
-                                val c = insn2
-                                val classIdx = buffer.readUShort(fieldIdsOff + c * 8)
-                                val f = resolveField(c)
-                                "$name v$a, v$b, ${resolveType(classIdx)}->${f.name}:${toDescriptor(f.typeName)}"
-                            }
-                            in 0x60..0x66 -> {
+                            in 0x60..0x66, in 0x67..0x6d -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2
-                                val classIdx = buffer.readUShort(fieldIdsOff + b * 8)
-                                val f = resolveField(b)
-                                "$name v$a, ${resolveType(classIdx)}->${f.name}:${toDescriptor(f.typeName)}"
-                            }
-                            in 0x67..0x6d -> {
-                                val a = (insn ushr 8) and 0xFF
-                                val b = insn2
-                                val classIdx = buffer.readUShort(fieldIdsOff + b * 8)
-                                val f = resolveField(b)
-                                "$name v$a, ${resolveType(classIdx)}->${f.name}:${toDescriptor(f.typeName)}"
+                                if (b in 0 until fieldIdsSize) {
+                                    val classIdx = buffer.readUShort(fieldIdsOff + b * 8)
+                                    val f = resolveField(b)
+                                    "$name v$a, ${resolveType(classIdx)}->${f.name}:${toDescriptor(f.typeName)}"
+                                } else {
+                                    "$name v$a, field@$b"
+                                }
                             }
                             in 0x90..0xaf -> {
                                 val a = (insn ushr 8) and 0xFF
@@ -1048,9 +1384,7 @@ object DexParser {
                         val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
                         val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2)
                         when (opcode) {
-                            0x03, 0x06, 0x09 -> {
-                                "$name v$insn2, v$insn3"
-                            }
+                            0x03, 0x06, 0x09 -> "$name v$insn2, v$insn3"
                             0x14, 0x17 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
@@ -1066,7 +1400,7 @@ object DexParser {
                                 val a = (insn2 and 0xFFFF) or (insn3 shl 16)
                                 "goto/32 :label_${offset + a}"
                             }
-                            0x2b, 0x2c -> {
+                            0x2b, 0x2c, 0x26 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
                                 "$name v$a, :label_${offset + b}"
@@ -1074,9 +1408,6 @@ object DexParser {
                             in 0x6e..0x72 -> {
                                 val count = (insn ushr 12) and 0xF
                                 val methIdx = insn2
-                                val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
-                                val m = resolveMethod(methIdx)
-                                
                                 val reg5 = (insn ushr 8) and 0xF
                                 val reg1 = insn3 and 0xF
                                 val reg2 = (insn3 ushr 4) and 0xF
@@ -1085,17 +1416,26 @@ object DexParser {
                                 
                                 val list = listOf(reg1, reg2, reg3, reg4, reg5)
                                 val args = list.take(count).map { "v$it" }.joinToString(", ")
-                                "$name {$args}, ${resolveType(classIdx)}->${m.name}${toSmaliSignature(m.signature)}"
+                                if (methIdx in 0 until methodIdsSize) {
+                                    val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
+                                    val m = resolveMethod(methIdx)
+                                    "$name {$args}, ${resolveType(classIdx)}->${m.name}${toSmaliSignature(m.signature)}"
+                                } else {
+                                    "$name {$args}, method@$methIdx"
+                                }
                             }
                             in 0x74..0x78 -> {
                                 val count = (insn ushr 8) and 0xFF
                                 val methIdx = insn2
                                 val startReg = insn3
-                                val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
-                                val m = resolveMethod(methIdx)
-                                
                                 val args = if (count > 0) "v$startReg..v${startReg + count - 1}" else ""
-                                "$name {$args}, ${resolveType(classIdx)}->${m.name}${toSmaliSignature(m.signature)}"
+                                if (methIdx in 0 until methodIdsSize) {
+                                    val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
+                                    val m = resolveMethod(methIdx)
+                                    "$name {$args}, ${resolveType(classIdx)}->${m.name}${toSmaliSignature(m.signature)}"
+                                } else {
+                                    "$name {$args}, method@$methIdx"
+                                }
                             }
                             else -> "$name v${(insn ushr 8) and 0xFF}, $insn2, $insn3"
                         }
@@ -1117,6 +1457,10 @@ object DexParser {
 
             instructions.add(text)
             pc += len
+        }
+
+        if (catchDirectives.isNotEmpty()) {
+            instructions.addAll(catchDirectives)
         }
 
         return instructions
@@ -1214,6 +1558,36 @@ object DexParser {
                 val typeStr = formatDescriptor(resolveType(idx))
                 Pair("$typeStr.class", curr + size - offset)
             }
+            0x1c -> { // ARRAY
+                val p = buffer.readUleb128Packed(curr)
+                val arraySize = (p and 0xFFFFFFFFL).toInt()
+                curr += (p ushr 32).toInt()
+                val list = mutableListOf<String>()
+                for (i in 0 until arraySize) {
+                    val (itemStr, consumed) = readEncodedValue(buffer, curr, resolveString, resolveType, formatDescriptor)
+                    list.add(itemStr)
+                    curr += consumed
+                }
+                Pair("{${list.joinToString(", ")}}", curr - offset)
+            }
+            0x1d -> { // ANNOTATION
+                val pType = buffer.readUleb128Packed(curr)
+                val typeIdx = (pType and 0xFFFFFFFFL).toInt()
+                curr += (pType ushr 32).toInt()
+                val pSize = buffer.readUleb128Packed(curr)
+                val elemSize = (pSize and 0xFFFFFFFFL).toInt()
+                curr += (pSize ushr 32).toInt()
+                val elements = mutableListOf<String>()
+                for (i in 0 until elemSize) {
+                    val pName = buffer.readUleb128Packed(curr)
+                    val nameIdx = (pName and 0xFFFFFFFFL).toInt()
+                    curr += (pName ushr 32).toInt()
+                    val (valStr, consumed) = readEncodedValue(buffer, curr, resolveString, resolveType, formatDescriptor)
+                    elements.add("${resolveString(nameIdx)} = $valStr")
+                    curr += consumed
+                }
+                Pair("@${resolveType(typeIdx)}(${elements.joinToString(", ")})", curr - offset)
+            }
             0x1e -> { // NULL
                 Pair("null", curr - offset)
             }
@@ -1225,6 +1599,53 @@ object DexParser {
                 val size = valueArg + 1
                 Pair("val_type_${valueType}_arg_${valueArg}", curr + size - offset)
             }
+        }
+    }
+
+    private fun parseAnnotationSet(
+        buffer: DexBuffer,
+        setOff: Int,
+        resolveString: (Int) -> String,
+        resolveType: (Int) -> String,
+        formatDescriptor: (String) -> String
+    ): List<DexAnnotationData> {
+        if (setOff == 0) return emptyList()
+        return try {
+            val size = buffer.readUInt(setOff)
+            val list = ArrayList<DexAnnotationData>(size)
+            for (i in 0 until size) {
+                val itemOff = buffer.readUInt(setOff + 4 + i * 4)
+                if (itemOff != 0) {
+                    val visibilityByte = buffer.readByte(itemOff).toInt() and 0xFF
+                    val visibility = when (visibilityByte) {
+                        0 -> "build"
+                        1 -> "runtime"
+                        2 -> "system"
+                        else -> "runtime"
+                    }
+                    var curr = itemOff + 1
+                    val pType = buffer.readUleb128Packed(curr)
+                    val typeIdx = (pType and 0xFFFFFFFFL).toInt()
+                    curr += (pType ushr 32).toInt()
+                    val pSize = buffer.readUleb128Packed(curr)
+                    val elemSize = (pSize and 0xFFFFFFFFL).toInt()
+                    curr += (pSize ushr 32).toInt()
+
+                    val elements = mutableMapOf<String, String>()
+                    for (e in 0 until elemSize) {
+                        val pName = buffer.readUleb128Packed(curr)
+                        val nameIdx = (pName and 0xFFFFFFFFL).toInt()
+                        curr += (pName ushr 32).toInt()
+                        val (valStr, consumed) = readEncodedValue(buffer, curr, resolveString, resolveType, formatDescriptor)
+                        elements[resolveString(nameIdx)] = valStr
+                        curr += consumed
+                    }
+                    list.add(DexAnnotationData(visibility, resolveType(typeIdx), elements))
+                }
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 
@@ -1244,7 +1665,6 @@ object DexParser {
             if (bytes1.contentEquals(bytes2)) return true
             if (bytes1.size < 112 || bytes2.size < 112) return false
 
-            // Check DEX magic: "dex\n"
             if (bytes1[0] != 'd'.code.toByte() || bytes1[1] != 'e'.code.toByte() ||
                 bytes1[2] != 'x'.code.toByte() || bytes1[3] != '\n'.code.toByte() ||
                 bytes2[0] != 'd'.code.toByte() || bytes2[1] != 'e'.code.toByte() ||
@@ -1305,7 +1725,6 @@ object DexParser {
             val classDefsSize = buffer.readUInt(96)
             val classDefsOff = buffer.readUInt(100)
 
-            // Lazy cached resolvers for extreme speed and low memory allocation
             val stringCache = arrayOfNulls<String>(stringIdsSize)
             fun resolveString(idx: Int): String {
                 if (idx !in 0 until stringIdsSize) return ""
@@ -1360,9 +1779,7 @@ object DexParser {
                         }
                     }
                 }
-                repeat(arrayDepth) {
-                    baseType += "[]"
-                }
+                repeat(arrayDepth) { baseType += "[]" }
                 return baseType
             }
 
@@ -1429,7 +1846,7 @@ object DexParser {
 
             val fnvPrime = 1099511628211L
 
-            // Parse Class definitions with high performance
+            // Parse Class definitions
             for (c in 0 until classDefsSize) {
                 if (onProgress != null && (c % 200 == 0 || c == classDefsSize - 1)) {
                     val progressFraction = 0.05f + (c.toFloat() / classDefsSize.coerceAtLeast(1)) * 0.95f
@@ -1441,6 +1858,7 @@ object DexParser {
                     val accessFlags = buffer.readUInt(off + 4)
                     val superclassIdx = buffer.readUInt(off + 8)
                     val interfacesOff = buffer.readUInt(off + 12)
+                    val annotationsOff = buffer.readUInt(off + 20)
                     val classDataOff = buffer.readUInt(off + 24)
                     val staticValuesOff = buffer.readUInt(off + 28)
 
@@ -1458,6 +1876,14 @@ object DexParser {
                             list.add(resolveFormattedType(typeIdx))
                         }
                         list
+                    } else emptyList()
+
+                    // Parse class annotations
+                    val classAnnotations = if (annotationsOff != 0) {
+                        try {
+                            val classAnnOff = buffer.readUInt(annotationsOff)
+                            parseAnnotationSet(buffer, classAnnOff, ::resolveString, ::resolveType, ::formatDescriptor)
+                        } catch (e: Exception) { emptyList() }
                     } else emptyList()
 
                     // Parse static values if present
@@ -1558,7 +1984,9 @@ object DexParser {
                                     ::resolveField,
                                     ::resolveMethod,
                                     fieldIdsOff,
+                                    fieldIdsSize,
                                     methodIdsOff,
+                                    methodIdsSize,
                                     options
                                 )
                             } else {
@@ -1601,7 +2029,9 @@ object DexParser {
                                     ::resolveField,
                                     ::resolveMethod,
                                     fieldIdsOff,
+                                    fieldIdsSize,
                                     methodIdsOff,
+                                    methodIdsSize,
                                     options
                                 )
                             } else {
@@ -1619,277 +2049,136 @@ object DexParser {
                         }
                     }
 
-                    // Deterministic class signature computation
-                    var classHash = FNV_OFFSET_BASIS
-                    classHash = mixString(classHash, className)
-                    classHash = mixString(classHash, superClassName)
-                    val effectiveClassFlags = if (options.ignoreCompilationOptimizations) {
-                        accessFlags.toInt() and 0x1000.inv()
-                    } else {
-                        accessFlags.toInt()
+                    // Fast deterministic 64-bit FNV-1a class signature
+                    var classHash = -3750763034362895579L
+                    for (i in 0 until className.length) {
+                        classHash = (classHash xor className[i].code.toLong()) * fnvPrime
                     }
-                    classHash = mixLong(classHash, effectiveClassFlags.toLong())
+                    for (i in 0 until superClassName.length) {
+                        classHash = (classHash xor superClassName[i].code.toLong()) * fnvPrime
+                    }
+                    classHash = (classHash xor accessFlags.toLong()) * fnvPrime
 
-                    for (iface in interfaceNames.sorted()) {
-                        classHash = mixString(classHash, iface)
+                    val sortedInterfaces = interfaceNames.sorted()
+                    for (iface in sortedInterfaces) {
+                        for (i in 0 until iface.length) {
+                            classHash = (classHash xor iface[i].code.toLong()) * fnvPrime
+                        }
                     }
 
                     val sortedFields = if (options.ignoreCompilationOptimizations) {
-                        fields.filter { (it.accessFlags and 0x1000) == 0 && (it.accessFlags and 0x0040) == 0 }
-                            .sortedBy { it.name + ":" + it.typeName }
+                        fields.filter { (it.accessFlags and 0x1000) == 0 }.sortedBy { it.name }
                     } else {
-                        fields.sortedBy { it.name + ":" + it.typeName }
+                        fields.sortedBy { it.name }
                     }
-
                     for (f in sortedFields) {
-                        val shouldOmitInitValue = options.ignoreCompilationOptimizations && isDefaultValue(f.typeName, f.initialValue)
-                        val effectiveFieldFlags = if (options.ignoreCompilationOptimizations) {
-                            f.accessFlags and 0x1000.inv() and 0x0040.inv()
-                        } else {
-                            f.accessFlags
+                        for (i in 0 until f.name.length) {
+                            classHash = (classHash xor f.name[i].code.toLong()) * fnvPrime
                         }
-                        classHash = mixString(classHash, f.name)
-                        classHash = mixString(classHash, f.typeName)
-                        classHash = mixLong(classHash, effectiveFieldFlags.toLong())
-                        if (f.initialValue != null && !shouldOmitInitValue && !options.ignoreFieldInitialValues) {
-                            classHash = mixString(classHash, f.initialValue)
+                        for (i in 0 until f.typeName.length) {
+                            classHash = (classHash xor f.typeName[i].code.toLong()) * fnvPrime
+                        }
+                        classHash = (classHash xor f.accessFlags.toLong()) * fnvPrime
+                        if (!options.ignoreFieldInitialValues && f.initialValue != null) {
+                            for (i in 0 until f.initialValue.length) {
+                                classHash = (classHash xor f.initialValue[i].code.toLong()) * fnvPrime
+                            }
                         }
                     }
 
                     val sortedMethods = if (options.ignoreCompilationOptimizations) {
-                        methods.filter { (it.accessFlags and 0x1000) == 0 && (it.accessFlags and 0x0040) == 0 }
-                            .sortedBy { it.name + ":" + it.signature }
+                        methods.filter { (it.accessFlags and 0x1000) == 0 && (it.accessFlags and 0x0040) == 0 }.sortedBy { it.name + it.signature }
                     } else {
-                        methods.sortedBy { it.name + ":" + it.signature }
+                        methods.sortedBy { it.name + it.signature }
                     }
-
                     for (m in sortedMethods) {
-                        val effectiveMethodFlags = if (options.ignoreCompilationOptimizations) {
-                            m.accessFlags and 0x1000.inv() and 0x0040.inv()
-                        } else {
-                            m.accessFlags
+                        for (i in 0 until m.name.length) {
+                            classHash = (classHash xor m.name[i].code.toLong()) * fnvPrime
                         }
-                        classHash = mixString(classHash, m.name)
-                        classHash = mixString(classHash, m.signature)
-                        classHash = mixLong(classHash, effectiveMethodFlags.toLong())
-                        if (!options.ignoreRegisterCount) {
-                            classHash = mixLong(classHash, m.registersCount.toLong())
+                        for (i in 0 until m.signature.length) {
+                            classHash = (classHash xor m.signature[i].code.toLong()) * fnvPrime
                         }
-                        classHash = mixString(classHash, m.codeHash)
+                        classHash = (classHash xor m.accessFlags.toLong()) * fnvPrime
+                        for (i in 0 until m.codeHash.length) {
+                            classHash = (classHash xor m.codeHash[i].code.toLong()) * fnvPrime
+                        }
                     }
 
-                    val signature = java.lang.Long.toHexString(classHash)
+                    val classSig = java.lang.Long.toHexString(classHash)
 
-                    val dexClass = DexClass(
+                    result[className] = DexClass(
                         name = className,
                         superClassName = superClassName,
                         interfaceNames = interfaceNames,
                         fields = fields,
                         methods = methods,
-                        signature = signature,
-                        accessFlags = accessFlags.toInt(),
+                        signature = classSig,
+                        accessFlags = accessFlags,
+                        annotations = classAnnotations,
                         dexBytes = bytes,
                         fieldIdsOff = fieldIdsOff,
                         methodIdsOff = methodIdsOff
                     )
-                    result[className] = dexClass
                 } catch (e: Exception) {
-                    // Fail-safe: ignore failed classes
+                    // Skip malformed class safely
                 }
             }
+            onProgress?.invoke(1.0f)
         } catch (e: Exception) {
-            e.printStackTrace()
+            onProgress?.invoke(1.0f)
         }
 
         return result
     }
 
-    fun disassembleClassMethods(dexClass: DexClass, options: DexCompareOptions): List<DexMethodData> {
-        val bytes = dexClass.dexBytes ?: return dexClass.methods
-        return try {
-            val buffer = DexBuffer(bytes)
-            val stringIdsSize = buffer.readUInt(56)
-            val stringIdsOff = buffer.readUInt(60)
-            val typeIdsSize = buffer.readUInt(64)
-            val typeIdsOff = buffer.readUInt(68)
-            val protoIdsSize = buffer.readUInt(72)
-            val protoIdsOff = buffer.readUInt(76)
-            val fieldIdsSize = buffer.readUInt(80)
-            val fieldIdsOff = buffer.readUInt(84)
-            val methodIdsSize = buffer.readUInt(88)
-            val methodIdsOff = buffer.readUInt(92)
+    fun preprocessSmali(lines: List<String>, options: DexCompareOptions): List<String> {
+        val result = ArrayList<String>(lines.size)
+        var insideAnnotation = false
 
-            val stringCache = arrayOfNulls<String>(stringIdsSize)
-            fun resolveString(idx: Int): String {
-                if (idx !in 0 until stringIdsSize) return ""
-                var s = stringCache[idx]
-                if (s == null) {
-                    s = try {
-                        val off = buffer.readUInt(stringIdsOff + idx * 4)
-                        buffer.readString(off)
-                    } catch (e: Exception) { "" }
-                    stringCache[idx] = s
-                }
-                return s
+        for (rawLine in lines) {
+            val line = rawLine.trim()
+
+            // Skip comment lines
+            if (line.startsWith("#")) {
+                continue
             }
 
-            val typeCache = arrayOfNulls<String>(typeIdsSize)
-            fun resolveType(idx: Int): String {
-                if (idx !in 0 until typeIdsSize) return ""
-                var t = typeCache[idx]
-                if (t == null) {
-                    t = try {
-                        val descriptorIdx = buffer.readUInt(typeIdsOff + idx * 4)
-                        resolveString(descriptorIdx)
-                    } catch (e: Exception) { "" }
-                    typeCache[idx] = t
+            // Skip debug info directives if enabled
+            if (options.ignoreDebugInfo) {
+                if (line.startsWith(".line ") ||
+                    line.startsWith(".source ") ||
+                    line.startsWith(".local ") ||
+                    line.startsWith(".end local") ||
+                    line.startsWith(".param ") ||
+                    line.startsWith(".end param") ||
+                    line.startsWith(".prologue") ||
+                    line.startsWith(".epilogue") ||
+                    line.startsWith(".restart local")
+                ) {
+                    continue
                 }
-                return t
             }
 
-            fun formatDescriptor(desc: String): String {
-                if (desc.isEmpty()) return ""
-                var arrayDepth = 0
-                var curr = desc
-                while (curr.startsWith("[")) {
-                    arrayDepth++
-                    curr = curr.substring(1)
-                }
-                var baseType = when (curr) {
-                    "V" -> "void"
-                    "Z" -> "boolean"
-                    "B" -> "byte"
-                    "S" -> "short"
-                    "C" -> "char"
-                    "I" -> "int"
-                    "J" -> "long"
-                    "F" -> "float"
-                    "D" -> "double"
-                    else -> {
-                        if (curr.startsWith("L") && curr.endsWith(";")) {
-                            curr.substring(1, curr.length - 1).replace('/', '.')
-                        } else {
-                            curr
-                        }
-                    }
-                }
-                repeat(arrayDepth) { baseType += "[]" }
-                return baseType
+            // Skip nop instructions if enabled
+            if (options.ignoreNopInstruction && line == "nop") {
+                continue
             }
 
-            fun resolveField(fieldIdx: Int): DexFieldData {
-                if (fieldIdx in 0 until fieldIdsSize) {
-                    val typeIdx = buffer.readUShort(fieldIdsOff + fieldIdx * 8 + 2)
-                    val nameIdx = buffer.readUInt(fieldIdsOff + fieldIdx * 8 + 4)
-                    return DexFieldData(resolveString(nameIdx), formatDescriptor(resolveType(typeIdx)), 0)
-                }
-                return DexFieldData("unknown_field", "void", 0)
+            // Skip register count directives if enabled
+            if (options.ignoreRegisterCount && (line.startsWith(".registers ") || line.startsWith(".locals "))) {
+                continue
             }
 
-            fun resolveMethod(methodIdx: Int): DexMethodData {
-                if (methodIdx in 0 until methodIdsSize) {
-                    val protoIdx = buffer.readUShort(methodIdsOff + methodIdx * 8 + 2)
-                    val nameIdx = buffer.readUInt(methodIdsOff + methodIdx * 8 + 4)
-                    val methodName = resolveString(nameIdx)
-                    val returnTypeIdx = buffer.readUInt(protoIdsOff + protoIdx * 12 + 4)
-                    val returnType = formatDescriptor(resolveType(returnTypeIdx.toInt()))
-                    val paramsOff = buffer.readUInt(protoIdsOff + protoIdx * 12 + 8)
-                    val params = mutableListOf<String>()
-                    if (paramsOff != 0) {
-                        val size = buffer.readUInt(paramsOff)
-                        for (p in 0 until size) {
-                            val typeIdx = buffer.readUShort(paramsOff + 4 + p * 2)
-                            params.add(formatDescriptor(resolveType(typeIdx)))
-                        }
-                    }
-                    return DexMethodData(methodName, "(${params.joinToString(", ")}) : $returnType", 0, "")
+            // Skip compilation optimization synthetic artifacts if enabled
+            if (options.ignoreCompilationOptimizations) {
+                if (line.contains("synthetic") || line.contains("bridge")) {
+                    continue
                 }
-                return DexMethodData("unknown_method", "() : void", 0, "")
             }
 
-            dexClass.methods.map { m ->
-                if (m.codeOff != 0 && m.instructions.isEmpty()) {
-                    val raw = disassembleMethod(
-                        buffer,
-                        bytes,
-                        m.codeOff,
-                        ::resolveString,
-                        ::resolveType,
-                        ::resolveField,
-                        ::resolveMethod,
-                        fieldIdsOff,
-                        methodIdsOff,
-                        options
-                    )
-                    m.copy(instructions = normalizeInstructions(raw))
-                } else {
-                    m
-                }
-            }
-        } catch (e: Exception) {
-            dexClass.methods
+            result.add(rawLine)
         }
-    }
-}
 
-class DexBuffer(private val bytes: ByteArray) {
-    fun readByte(offset: Int): Byte {
-        return bytes[offset]
-    }
-
-    fun readUShort(offset: Int): Int {
-        val b1 = bytes[offset].toInt() and 0xFF
-        val b2 = bytes[offset + 1].toInt() and 0xFF
-        return b1 or (b2 shl 8)
-    }
-
-    fun readUInt(offset: Int): Int {
-        val b1 = bytes[offset].toInt() and 0xFF
-        val b2 = bytes[offset + 1].toInt() and 0xFF
-        val b3 = bytes[offset + 2].toInt() and 0xFF
-        val b4 = bytes[offset + 3].toInt() and 0xFF
-        return b1 or (b2 shl 8) or (b3 shl 16) or (b4 shl 24)
-    }
-
-    fun readString(offset: Int): String {
-        var curr = offset
-        var len = 0
-        var shift = 0
-        val size = bytes.size
-        while (curr < size) {
-            val b = bytes[curr].toInt() and 0xFF
-            curr++
-            len = len or ((b and 0x7F) shl shift)
-            if ((b and 0x80) == 0) break
-            shift += 7
-        }
-        val start = curr
-        while (curr < size && bytes[curr] != 0.toByte()) {
-            curr++
-        }
-        val byteLen = curr - start
-        if (byteLen <= 0) return ""
-        return String(bytes, start, byteLen, Charsets.UTF_8)
-    }
-
-    fun readUleb128Packed(offset: Int): Long {
-        var result = 0
-        var shift = 0
-        var index = offset
-        val size = bytes.size
-        while (index < size) {
-            val b = bytes[index].toInt() and 0xFF
-            index++
-            result = result or ((b and 0x7F) shl shift)
-            if ((b and 0x80) == 0) break
-            shift += 7
-        }
-        val bytesRead = index - offset
-        return (result.toLong() and 0xFFFFFFFFL) or (bytesRead.toLong() shl 32)
-    }
-
-    fun readUleb128(offset: Int): Pair<Int, Int> {
-        val packed = readUleb128Packed(offset)
-        return Pair((packed and 0xFFFFFFFFL).toInt(), (packed ushr 32).toInt())
+        return result
     }
 }

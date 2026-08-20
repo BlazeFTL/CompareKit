@@ -401,11 +401,33 @@ object FileHelper {
             val remainingDeleted = candidateDeleted.filter { !matchedDeleted.contains(it.relativePath) }
             val remainingAdded = candidateAdded.filter { !matchedAdded.contains(it.relativePath) }
 
-            return@coroutineScope (unchangedAndModified + movedResults + remainingDeleted + remainingAdded)
-                .sortedBy { it.relativePath.lowercase() }
+            val finalResults = (unchangedAndModified + movedResults + remainingDeleted + remainingAdded)
+            return@coroutineScope consolidateMultidexEntries(finalResults).sortedBy { it.relativePath.lowercase() }
         }
 
-        return@coroutineScope rawResults.sortedBy { it.relativePath.lowercase() }
+        return@coroutineScope consolidateMultidexEntries(rawResults).sortedBy { it.relativePath.lowercase() }
+    }
+
+    private fun consolidateMultidexEntries(list: List<FileCompareStatus>): List<FileCompareStatus> {
+        val dexRegex = Regex("(?i)^classes\\d*\\.dex$")
+        val dexEntries = list.filter { it.relativePath.matches(dexRegex) }
+        if (dexEntries.size <= 1) {
+            return list
+        }
+        val nonDexEntries = list.filter { !it.relativePath.matches(dexRegex) }
+        val totalOrigSize = dexEntries.sumOf { it.sizeOriginal }
+        val totalModSize = dexEntries.sumOf { it.sizeModified }
+        val isAnyModified = dexEntries.any { it.status == FileStatus.MODIFIED || it.status == FileStatus.ADDED || it.status == FileStatus.DELETED }
+        val status = if (isAnyModified) FileStatus.MODIFIED else FileStatus.UNCHANGED
+
+        val consolidatedDex = FileCompareStatus(
+            relativePath = "classes.dex",
+            status = status,
+            sizeOriginal = totalOrigSize,
+            sizeModified = totalModSize,
+            isBinary = false
+        )
+        return nonDexEntries + consolidatedDex
     }
 
     private fun areZipEntriesContentEqual(
@@ -585,11 +607,11 @@ object FileHelper {
             val remainingDeleted = candidateDeleted.filter { !matchedDeleted.contains(it.relativePath) }
             val remainingAdded = candidateAdded.filter { !matchedAdded.contains(it.relativePath) }
 
-            return@coroutineScope (unchangedAndModified + movedResults + remainingDeleted + remainingAdded)
-                .sortedBy { it.relativePath.lowercase() }
+            val finalResults = (unchangedAndModified + movedResults + remainingDeleted + remainingAdded)
+            return@coroutineScope consolidateMultidexEntries(finalResults).sortedBy { it.relativePath.lowercase() }
         }
 
-        return@coroutineScope rawResults.sortedBy { it.relativePath.lowercase() }
+        return@coroutineScope consolidateMultidexEntries(rawResults).sortedBy { it.relativePath.lowercase() }
     }
 
     private fun areFilesContentEqual(
