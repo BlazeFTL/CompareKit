@@ -1,13 +1,14 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -56,10 +57,10 @@ fun FocusAndFilterDialog(
     ) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .fillMaxHeight(0.88f)
-                .clip(RoundedCornerShape(24.dp)),
-            shape = RoundedCornerShape(24.dp),
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.85f)
+                .clip(RoundedCornerShape(20.dp)),
+            shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp
         ) {
@@ -68,288 +69,272 @@ fun FocusAndFilterDialog(
                     .fillMaxSize()
                     .padding(20.dp)
             ) {
-                // Header
+                // Header (matches DiffSettingsDialog in SandboxDialogs)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(42.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Filled.VisibilityOff,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
+                        Icon(
+                            imageVector = Icons.Outlined.CenterFocusStrong,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
                         Column {
                             Text(
-                                text = "Focus Mode & Line Filters",
+                                text = "Focus & Line Filters",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 17.5.sp
                             )
                             Text(
                                 text = "Context window & keyword line hiding",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
                             )
                         }
                     }
 
                     IconButton(
                         onClick = onDismiss,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 12.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                )
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Scrollable Content
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .verticalScroll(scrollState),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // SECTION 1: FOCUS MODE CARD
-                    Card(
+                    // SECTION 1: FOCUS MODE
+                    Text(
+                        text = "FOCUS MODE & CONTEXT WINDOW",
+                        style = TextStyle(
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.1.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+
+                    Surface(
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (focusModeEnabled)
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                        ),
-                        border = BorderStroke(
-                            1.dp,
-                            if (focusModeEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                        ),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp)
+                        ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onToggleFocusMode(!focusModeEnabled) },
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.CenterFocusStrong,
-                                        contentDescription = null,
-                                        tint = if (focusModeEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(22.dp)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Enable Focus Mode",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    Column {
-                                        Text(
-                                            text = "Focus Mode",
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = "Show only lines near changes",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                    Text(
+                                        text = "Show only lines near code modifications",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 12.sp
+                                    )
                                 }
 
                                 Switch(
                                     checked = focusModeEnabled,
-                                    onCheckedChange = { onToggleFocusMode(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                                        checkedTrackColor = MaterialTheme.colorScheme.primary
-                                    )
+                                    onCheckedChange = { onToggleFocusMode(it) }
                                 )
                             }
 
-                            Text(
-                                text = "Keeps only a specified number of context lines above and below modified/added/deleted blocks. Hides all distant unchanged lines.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 10.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
                             )
 
-                            // Context Lines Controls (always available to customize)
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .padding(vertical = 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            // Context lines count adjuster
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
+                                Column {
                                     Text(
-                                        text = "Context Lines (Above & Below):",
-                                        style = MaterialTheme.typography.labelMedium,
+                                        text = "Context Lines",
+                                        style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
+                                    Text(
+                                        text = "Lines kept above & below changes",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 11.5.sp
+                                    )
+                                }
 
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                                ) {
+                                    Text(
+                                        text = "±$focusContextLines lines",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Stepper Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val newVal = (focusContextLines - 5).coerceAtLeast(0)
+                                        onSetFocusContextLines(newVal)
+                                        contextLinesText = newVal.toString()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                    modifier = Modifier.height(40.dp)
+                                ) {
+                                    Text("-5", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+
+                                OutlinedIconButton(
+                                    onClick = {
+                                        val newVal = (focusContextLines - 1).coerceAtLeast(0)
+                                        onSetFocusContextLines(newVal)
+                                        contextLinesText = newVal.toString()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "-1", modifier = Modifier.size(16.dp))
+                                }
+
+                                OutlinedTextField(
+                                    value = contextLinesText,
+                                    onValueChange = { input ->
+                                        val filtered = input.filter { it.isDigit() }
+                                        contextLinesText = filtered
+                                        val num = filtered.toIntOrNull()
+                                        if (num != null) {
+                                            onSetFocusContextLines(num)
+                                        }
+                                    },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number,
+                                        imeAction = ImeAction.Done
+                                    ),
+                                    textStyle = TextStyle(
+                                        textAlign = TextAlign.Center,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                )
+
+                                OutlinedIconButton(
+                                    onClick = {
+                                        val newVal = (focusContextLines + 1).coerceAtMost(500)
+                                        onSetFocusContextLines(newVal)
+                                        contextLinesText = newVal.toString()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "+1", modifier = Modifier.size(16.dp))
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        val newVal = (focusContextLines + 5).coerceAtMost(500)
+                                        onSetFocusContextLines(newVal)
+                                        contextLinesText = newVal.toString()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                    modifier = Modifier.height(40.dp)
+                                ) {
+                                    Text("+5", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Presets
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(5, 10, 20, 50, 100).forEach { preset ->
+                                    val isSelected = focusContextLines == preset
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                    ) {
-                                        Text(
-                                            text = "±$focusContextLines lines",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                        )
-                                    }
-                                }
-
-                                // Stepper and input field
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    // Decrement buttons
-                                    FilledTonalIconButton(
-                                        onClick = {
-                                            val newVal = (focusContextLines - 5).coerceAtLeast(0)
-                                            onSetFocusContextLines(newVal)
-                                            contextLinesText = newVal.toString()
-                                        },
-                                        modifier = Modifier.size(36.dp),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Text("-5", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                    }
-
-                                    FilledTonalIconButton(
-                                        onClick = {
-                                            val newVal = (focusContextLines - 1).coerceAtLeast(0)
-                                            onSetFocusContextLines(newVal)
-                                            contextLinesText = newVal.toString()
-                                        },
-                                        modifier = Modifier.size(36.dp),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Icon(Icons.Default.Remove, contentDescription = "-1", modifier = Modifier.size(16.dp))
-                                    }
-
-                                    // Number input
-                                    OutlinedTextField(
-                                        value = contextLinesText,
-                                        onValueChange = { input ->
-                                            val filtered = input.filter { it.isDigit() }
-                                            contextLinesText = filtered
-                                            val num = filtered.toIntOrNull()
-                                            if (num != null) {
-                                                onSetFocusContextLines(num)
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                onSetFocusContextLines(preset)
+                                                contextLinesText = preset.toString()
                                             }
-                                        },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(
-                                            keyboardType = KeyboardType.Number,
-                                            imeAction = ImeAction.Done
-                                        ),
-                                        textStyle = TextStyle(
-                                            textAlign = TextAlign.Center,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        ),
-                                        shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.weight(1f),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                                        )
-                                    )
-
-                                    // Increment buttons
-                                    FilledTonalIconButton(
-                                        onClick = {
-                                            val newVal = (focusContextLines + 1).coerceAtMost(1000)
-                                            onSetFocusContextLines(newVal)
-                                            contextLinesText = newVal.toString()
-                                        },
-                                        modifier = Modifier.size(36.dp),
-                                        shape = RoundedCornerShape(8.dp)
                                     ) {
-                                        Icon(Icons.Default.Add, contentDescription = "+1", modifier = Modifier.size(16.dp))
-                                    }
-
-                                    FilledTonalIconButton(
-                                        onClick = {
-                                            val newVal = (focusContextLines + 5).coerceAtMost(1000)
-                                            onSetFocusContextLines(newVal)
-                                            contextLinesText = newVal.toString()
-                                        },
-                                        modifier = Modifier.size(36.dp),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Text("+5", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                    }
-                                }
-
-                                // Preset Line Chips
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    listOf(5, 10, 20, 50, 100).forEach { preset ->
-                                        val isSelected = focusContextLines == preset
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                            border = BorderStroke(
-                                                1.dp,
-                                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                            ),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable {
-                                                    onSetFocusContextLines(preset)
-                                                    contextLinesText = preset.toString()
-                                                }
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.padding(vertical = 7.dp)
                                         ) {
-                                            Box(
-                                                contentAlignment = Alignment.Center,
-                                                modifier = Modifier.padding(vertical = 6.dp)
-                                            ) {
-                                                Text(
-                                                    text = "${preset}L",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
+                                            Text(
+                                                text = "${preset}L",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                         }
                                     }
                                 }
@@ -357,73 +342,57 @@ fun FocusAndFilterDialog(
                         }
                     }
 
-                    // SECTION 2: HIDE LINES BY KEYWORD / PHRASE
-                    Card(
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    )
+
+                    // SECTION 2: HIDE LINES BY KEYWORD
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "HIDE LINES BY KEYWORD",
+                            style = TextStyle(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.1.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        )
+
+                        if (hiddenKeywords.isNotEmpty()) {
+                            Text(
+                                text = "Clear All",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier
+                                    .clickable { onClearHiddenKeywords() }
+                                    .padding(4.dp)
+                            )
+                        }
+                    }
+
+                    Surface(
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (hiddenKeywords.isNotEmpty())
-                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.25f)
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                        ),
-                        border = BorderStroke(
-                            1.dp,
-                            if (hiddenKeywords.isNotEmpty()) MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)
-                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                        ),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.FilterAlt,
-                                        contentDescription = null,
-                                        tint = if (hiddenKeywords.isNotEmpty()) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                    Column {
-                                        Text(
-                                            text = "Hide Lines in Diff Editor",
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = if (hiddenKeywords.isEmpty()) "No words/phrases hidden" else "${hiddenKeywords.size} active pattern filter(s)",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-
-                                if (hiddenKeywords.isNotEmpty()) {
-                                    TextButton(
-                                        onClick = onClearHiddenKeywords,
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            "Clear All",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.error
-                                        )
-                                    }
-                                }
-                            }
-
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
                             Text(
-                                text = "Every line containing the specified word or sentence (e.g. \"AdShow\", \"Log.d\") will be completely hidden anywhere inside the diff.",
+                                text = "Hides every line inside the diff containing specific words or phrases (e.g. \"AdShow\", \"Log.d\").",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
                             )
 
                             // Keyword Input Bar
@@ -456,7 +425,7 @@ fun FocusAndFilterDialog(
                                     keyboardActions = KeyboardActions(
                                         onDone = {
                                             if (newKeywordText.isNotBlank()) {
-                                                onAddHiddenKeyword(newKeywordText)
+                                                onAddHiddenKeyword(newKeywordText.trim())
                                                 newKeywordText = ""
                                             }
                                         }
@@ -473,19 +442,15 @@ fun FocusAndFilterDialog(
                                 Button(
                                     onClick = {
                                         if (newKeywordText.isNotBlank()) {
-                                            onAddHiddenKeyword(newKeywordText)
+                                            onAddHiddenKeyword(newKeywordText.trim())
                                             newKeywordText = ""
                                         }
                                     },
                                     enabled = newKeywordText.isNotBlank(),
                                     shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.secondary,
-                                        contentColor = MaterialTheme.colorScheme.onSecondary
-                                    ),
                                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
                                 ) {
-                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("Add", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 }
@@ -493,9 +458,7 @@ fun FocusAndFilterDialog(
 
                             // Quick Suggestions Row
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
+                                modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
@@ -511,8 +474,11 @@ fun FocusAndFilterDialog(
                                     val isAdded = hiddenKeywords.contains(sample)
                                     Surface(
                                         shape = RoundedCornerShape(6.dp),
-                                        color = if (isAdded) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                        color = if (isAdded) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
+                                        border = BorderStroke(
+                                            0.5.dp,
+                                            if (isAdded) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                        ),
                                         modifier = Modifier.clickable {
                                             if (!isAdded) {
                                                 onAddHiddenKeyword(sample)
@@ -524,7 +490,7 @@ fun FocusAndFilterDialog(
                                             style = MaterialTheme.typography.labelSmall,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = if (isAdded) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary,
+                                            color = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                         )
                                     }
@@ -532,22 +498,14 @@ fun FocusAndFilterDialog(
                             }
 
                             // Active Filter Chips
-                            Spacer(modifier = Modifier.height(12.dp))
                             if (hiddenKeywords.isEmpty()) {
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = "No lines hidden currently. Add words like \"AdShow\" to hide every line containing them.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(12.dp)
-                                    )
-                                }
+                                Text(
+                                    text = "No lines hidden currently.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
                             } else {
                                 FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
@@ -556,19 +514,19 @@ fun FocusAndFilterDialog(
                                 ) {
                                     hiddenKeywords.forEach { kw ->
                                         Surface(
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f))
                                         ) {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                                modifier = Modifier.padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Filled.VisibilityOff,
                                                     contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.error,
+                                                    tint = MaterialTheme.colorScheme.primary,
                                                     modifier = Modifier.size(13.dp)
                                                 )
                                                 Text(
@@ -576,19 +534,19 @@ fun FocusAndFilterDialog(
                                                     style = MaterialTheme.typography.labelSmall,
                                                     fontWeight = FontWeight.SemiBold,
                                                     fontFamily = FontFamily.Monospace,
-                                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                                    color = MaterialTheme.colorScheme.onSurface,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
                                                     modifier = Modifier.widthIn(max = 180.dp)
                                                 )
                                                 IconButton(
                                                     onClick = { onRemoveHiddenKeyword(kw) },
-                                                    modifier = Modifier.size(20.dp)
+                                                    modifier = Modifier.size(22.dp)
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.Close,
                                                         contentDescription = "Remove",
-                                                        tint = MaterialTheme.colorScheme.error,
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                         modifier = Modifier.size(13.dp)
                                                     )
                                                 }
@@ -603,7 +561,7 @@ fun FocusAndFilterDialog(
 
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 12.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
                 )
 
                 // Dialog Action Buttons
@@ -628,10 +586,6 @@ fun FocusAndFilterDialog(
                     Button(
                         onClick = onDismiss,
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
                         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp)
                     ) {
                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))

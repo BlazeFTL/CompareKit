@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -7,9 +8,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.UnfoldMore
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -170,6 +176,32 @@ fun SplitDiffView(
                             "${rowIndex}_${l?.type}_${l?.originalIndex}_${r?.type}_${r?.revisedIndex}"
                         }
                     ) { rowIndex, row ->
+                        // Visual banner for collapsed lines in between distant changes or at start
+                        if (rowIndex == 0) {
+                            val startOrig = row.leftItem?.originalIndex ?: 0
+                            val startRev = row.rightItem?.revisedIndex ?: 0
+                            val leadingHidden = maxOf(startOrig, startRev)
+                            if (leadingHidden > 0) {
+                                DisableSelection {
+                                    CollapsedLinesBanner(count = leadingHidden, label = "at start")
+                                }
+                            }
+                        } else {
+                            val prevRow = splitRows[rowIndex - 1]
+                            val origGap = if (row.leftItem?.originalIndex != null && prevRow.leftItem?.originalIndex != null) {
+                                row.leftItem.originalIndex - prevRow.leftItem.originalIndex - 1
+                            } else 0
+                            val revGap = if (row.rightItem?.revisedIndex != null && prevRow.rightItem?.revisedIndex != null) {
+                                row.rightItem.revisedIndex - prevRow.rightItem.revisedIndex - 1
+                            } else 0
+                            val gapCount = maxOf(origGap, revGap)
+                            if (gapCount > 0) {
+                                DisableSelection {
+                                    CollapsedLinesBanner(count = gapCount)
+                                }
+                            }
+                        }
+
                         val leftIndex = row.leftItem?.let { diffLines.indexOf(it) } ?: -1
                         val rightIndex = row.rightItem?.let { diffLines.indexOf(it) } ?: -1
                         val isLeftActive = leftIndex in activeBlockLineRange
@@ -330,10 +362,14 @@ private fun CellView(
 
     val effectiveLineNumFontSize = (fontSizeSp * 0.85f).coerceAtLeast(3.5f)
 
+    val effectiveLineHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).sp
+    val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.35f).dp
+    val verticalLinePadding = (fontSizeSp * 0.15f * lineHeightMultiplier).coerceAtLeast(2f).dp
+
     val monoCodeStyle = TextStyle(
         fontSize = fontSizeSp.sp,
         fontFamily = FontFamily.Monospace,
-        lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
+        lineHeight = effectiveLineHeight,
         lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
             alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
             trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
@@ -344,16 +380,13 @@ private fun CellView(
     val monoLineNumStyle = TextStyle(
         fontSize = effectiveLineNumFontSize.sp,
         fontFamily = FontFamily.Monospace,
-        lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
+        lineHeight = effectiveLineHeight,
         lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
             alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
             trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
         ),
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
-
-    val minLineRowHeight = (fontSizeSp * lineHeightMultiplier).dp
-    val verticalLinePadding = ((lineHeightMultiplier - 1.20f).coerceAtLeast(0f) * fontSizeSp * 0.16f).dp
 
     Row(
         modifier = Modifier

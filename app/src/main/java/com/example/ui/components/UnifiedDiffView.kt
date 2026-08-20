@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -11,7 +12,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.UnfoldMore
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -102,10 +107,14 @@ fun UnifiedDiffView(
         (maxLineLength * charWidthDp + lineNumPadding).coerceAtLeast(320f).dp
     }
 
+    val effectiveLineHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).sp
+    val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.35f).dp
+    val verticalLinePadding = (fontSizeSp * 0.15f * lineHeightMultiplier).coerceAtLeast(2f).dp
+
     val monoCodeStyle = TextStyle(
         fontSize = fontSizeSp.sp,
         fontFamily = FontFamily.Monospace,
-        lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
+        lineHeight = effectiveLineHeight,
         lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
             alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
             trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
@@ -116,7 +125,7 @@ fun UnifiedDiffView(
     val monoLineNumStyle = TextStyle(
         fontSize = effectiveLineNumFontSize.sp,
         fontFamily = FontFamily.Monospace,
-        lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
+        lineHeight = effectiveLineHeight,
         lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
             alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
             trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
@@ -156,6 +165,32 @@ fun UnifiedDiffView(
                         items = diffLines,
                         key = { index, item -> "${index}_${item.type}_${item.originalIndex}_${item.revisedIndex}" }
                     ) { index, item ->
+                        // Visual banner for collapsed lines in between distant changes or at start
+                        if (index == 0) {
+                            val startOrig = item.originalIndex ?: 0
+                            val startRev = item.revisedIndex ?: 0
+                            val leadingHidden = maxOf(startOrig, startRev)
+                            if (leadingHidden > 0) {
+                                DisableSelection {
+                                    CollapsedLinesBanner(count = leadingHidden, label = "at start")
+                                }
+                            }
+                        } else {
+                            val prevItem = diffLines[index - 1]
+                            val origGap = if (item.originalIndex != null && prevItem.originalIndex != null) {
+                                item.originalIndex - prevItem.originalIndex - 1
+                            } else 0
+                            val revGap = if (item.revisedIndex != null && prevItem.revisedIndex != null) {
+                                item.revisedIndex - prevItem.revisedIndex - 1
+                            } else 0
+                            val gapCount = maxOf(origGap, revGap)
+                            if (gapCount > 0) {
+                                DisableSelection {
+                                    CollapsedLinesBanner(count = gapCount)
+                                }
+                            }
+                        }
+
                         val (bgColor, prefixColor, textColor) = when (item.type) {
                             DiffType.INSERT -> {
                                 if (isDarkMode) {
@@ -201,8 +236,6 @@ fun UnifiedDiffView(
                         val revLineNum = item.revisedIndex?.plus(1)?.toString() ?: ""
 
                         val isActiveLine = index in activeBlockLineRange
-                        val minLineRowHeight = (fontSizeSp * lineHeightMultiplier).dp
-                        val verticalLinePadding = ((lineHeightMultiplier - 1.20f).coerceAtLeast(0f) * fontSizeSp * 0.16f).dp
 
                         Row(
                             modifier = Modifier
@@ -454,4 +487,46 @@ fun HorizontalScrollBar(
         )
     }
 }
+
+@Composable
+fun CollapsedLinesBanner(
+    count: Int,
+    modifier: Modifier = Modifier,
+    label: String? = null
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp, horizontal = 4.dp),
+        shape = RoundedCornerShape(6.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.UnfoldMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "··· $count line${if (count > 1) "s" else ""} hidden ${label ?: "(unchanged context)"} ···",
+                style = TextStyle(
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            )
+        }
+    }
+}
+
 

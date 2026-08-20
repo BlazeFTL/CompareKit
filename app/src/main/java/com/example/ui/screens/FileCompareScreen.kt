@@ -894,8 +894,8 @@ fun FileCompareScreen(
             // Active Filter Sub-Banner (Displays when Focus Mode or Hide Lines is active)
             AnimatedVisibility(visible = !fileItem.relativePath.lowercase().endsWith(".dex") && (focusModeEnabled || hiddenLineKeywords.isNotEmpty())) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { showFocusFilterDialog = true }
@@ -903,7 +903,7 @@ fun FileCompareScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 5.dp),
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -915,15 +915,15 @@ fun FileCompareScreen(
                             Icon(
                                 imageVector = Icons.Filled.VisibilityOff,
                                 contentDescription = null,
-                                modifier = Modifier.size(13.dp),
+                                modifier = Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Text(
                                 text = buildString {
-                                    if (focusModeEnabled) append("Focus Mode (±${focusContextLines} lines)")
+                                    if (focusModeEnabled) append("Focus Mode (±${focusContextLines}L)")
                                     if (focusModeEnabled && hiddenLineKeywords.isNotEmpty()) append(" • ")
                                     if (hiddenLineKeywords.isNotEmpty()) {
-                                        append("${hiddenLineKeywords.size} hidden line rule${if (hiddenLineKeywords.size > 1) "s" else ""}")
+                                        append("${hiddenLineKeywords.size} keyword filter${if (hiddenLineKeywords.size > 1) "s" else ""}")
                                         val sample = hiddenLineKeywords.firstOrNull()
                                         if (sample != null) {
                                             append(" (\"$sample\"${if (hiddenLineKeywords.size > 1) ", ..." else ""})")
@@ -932,14 +932,14 @@ fun FileCompareScreen(
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
 
                         Text(
-                            text = "Adjust",
+                            text = "Configure",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
