@@ -161,7 +161,7 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
             val mods = formatAccessFlags(f.accessFlags)
             val shouldOmitInitValue = options.ignoreCompilationOptimizations && isDefaultValue(f.typeName, f.initialValue)
             sb.append(".field ").append(mods).append(" ").append(f.name).append(":").append(toDescriptor(f.typeName))
-            if (f.initialValue != null && !shouldOmitInitValue) {
+            if (f.initialValue != null && !shouldOmitInitValue && !options.ignoreFieldInitialValues) {
                 sb.append(" = ").append(f.initialValue)
             }
             sb.append("\n")
@@ -328,208 +328,7 @@ object DexParser {
         return filtered
     }
 
-    private const val FNV_PRIME = 1099511628211L
-    private const val FNV_OFFSET_BASIS = -3750763034362895579L
 
-    private fun mixLong(currentHash: Long, v: Long): Long {
-        return (currentHash xor v) * FNV_PRIME
-    }
-
-    private fun mixString(currentHash: Long, s: String): Long {
-        var h = currentHash
-        for (i in 0 until s.length) {
-            h = (h xor s[i].code.toLong()) * FNV_PRIME
-        }
-        return (h xor 0x1FL) * FNV_PRIME
-    }
-
-    private fun computeMethodCodeHash(
-        buffer: DexBuffer,
-        bytes: ByteArray,
-        codeOff: Int,
-        resolveString: (Int) -> String,
-        resolveType: (Int) -> String,
-        resolveField: (Int) -> DexFieldData,
-        resolveMethod: (Int) -> DexMethodData,
-        fieldIdsOff: Int,
-        methodIdsOff: Int,
-        options: DexCompareOptions
-    ): String {
-        if (codeOff == 0) return ""
-        return try {
-            val insnsSize = buffer.readUInt(codeOff + 12)
-            if (insnsSize <= 0 || codeOff + 16 + insnsSize * 2 > bytes.size) return ""
-
-            var hash = FNV_OFFSET_BASIS
-
-            var pc = 0
-            while (pc < insnsSize) {
-                val offset = pc
-                val insn = buffer.readUShort(codeOff + 16 + pc * 2)
-                val opcode = insn and 0xFF
-                val len = getOpcodeLength(opcode)
-                if (len <= 0 || pc + len > insnsSize) break
-
-                if (opcode == 0x00 && options.ignoreNopInstruction) {
-                    pc += len
-                    continue
-                }
-
-                hash = mixLong(hash, opcode.toLong())
-
-                when (len) {
-                    1 -> {
-                        when (opcode) {
-                            0x00, 0x0e -> {}
-                            0x01, 0x04, 0x07, 0x12, 0x21, in 0x7b..0x8f, in 0xb0..0xcf -> {
-                                val a = (insn ushr 8) and 0xF
-                                val b = (insn ushr 12) and 0xF
-                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
-                            }
-                            0x28 -> { // goto (relative branch)
-                                var a = (insn ushr 8) and 0xFF
-                                if (a > 127) a -= 256
-                                hash = mixLong(hash, (offset + a).toLong())
-                            }
-                            else -> {
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, a.toLong())
-                            }
-                        }
-                    }
-                    2 -> {
-                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
-                        when (opcode) {
-                            0x1a -> { // const-string
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixString(hash, resolveString(insn2))
-                            }
-                            0x1c, 0x1f, 0x22 -> { // const-class, check-cast, new-instance
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixString(hash, resolveType(insn2))
-                            }
-                            0x20, 0x23 -> { // instance-of, new-array
-                                val a = (insn ushr 8) and 0xF
-                                val b = (insn ushr 12) and 0xF
-                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
-                                hash = mixString(hash, resolveType(insn2))
-                            }
-                            0x29 -> { // goto/16
-                                val a = insn2.toShort().toInt()
-                                hash = mixLong(hash, (offset + a).toLong())
-                            }
-                            in 0x32..0x37 -> { // if-test
-                                val a = (insn ushr 8) and 0xF
-                                val b = (insn ushr 12) and 0xF
-                                val c = insn2.toShort().toInt()
-                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
-                                hash = mixLong(hash, (offset + c).toLong())
-                            }
-                            in 0x38..0x3d -> { // if-testz
-                                val a = (insn ushr 8) and 0xFF
-                                val b = insn2.toShort().toInt()
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixLong(hash, (offset + b).toLong())
-                            }
-                            in 0x52..0x58, in 0x59..0x5f -> { // iget/iput
-                                val a = (insn ushr 8) and 0xF
-                                val b = (insn ushr 12) and 0xF
-                                val c = insn2
-                                val classIdx = buffer.readUShort(fieldIdsOff + c * 8)
-                                val f = resolveField(c)
-                                hash = mixLong(hash, ((a.toLong() shl 4) or b.toLong()))
-                                hash = mixString(hash, resolveType(classIdx))
-                                hash = mixString(hash, f.name)
-                                hash = mixString(hash, toDescriptor(f.typeName))
-                            }
-                            in 0x60..0x66, in 0x67..0x6d -> { // sget/sput
-                                val a = (insn ushr 8) and 0xFF
-                                val b = insn2
-                                val classIdx = buffer.readUShort(fieldIdsOff + b * 8)
-                                val f = resolveField(b)
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixString(hash, resolveType(classIdx))
-                                hash = mixString(hash, f.name)
-                                hash = mixString(hash, toDescriptor(f.typeName))
-                            }
-                            else -> {
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, ((a.toLong() shl 16) or (insn2.toLong() and 0xFFFFL)))
-                            }
-                        }
-                    }
-                    3 -> {
-                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
-                        val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2)
-                        when (opcode) {
-                            0x1b -> { // const-string/jumbo
-                                val a = (insn ushr 8) and 0xFF
-                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixString(hash, resolveString(b))
-                            }
-                            0x2a -> { // goto/32
-                                val a = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                hash = mixLong(hash, (offset + a).toLong())
-                            }
-                            0x2b, 0x2c -> { // packed-switch, sparse-switch
-                                val a = (insn ushr 8) and 0xFF
-                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixLong(hash, (offset + b).toLong())
-                            }
-                            in 0x6e..0x72 -> { // invoke-kind
-                                val count = (insn ushr 12) and 0xF
-                                val methIdx = insn2
-                                val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
-                                val m = resolveMethod(methIdx)
-                                hash = mixLong(hash, ((count.toLong() shl 16) or (insn3.toLong() and 0xFFFFL)))
-                                hash = mixString(hash, resolveType(classIdx))
-                                hash = mixString(hash, m.name)
-                                hash = mixString(hash, m.signature)
-                            }
-                            in 0x74..0x78 -> { // invoke-kind/range
-                                val count = (insn ushr 8) and 0xFF
-                                val methIdx = insn2
-                                val startReg = insn3
-                                val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
-                                val m = resolveMethod(methIdx)
-                                hash = mixLong(hash, ((count.toLong() shl 16) or (startReg.toLong() and 0xFFFFL)))
-                                hash = mixString(hash, resolveType(classIdx))
-                                hash = mixString(hash, m.name)
-                                hash = mixString(hash, m.signature)
-                            }
-                            else -> {
-                                val a = (insn ushr 8) and 0xFF
-                                hash = mixLong(hash, a.toLong())
-                                hash = mixLong(hash, insn2.toLong())
-                                hash = mixLong(hash, insn3.toLong())
-                            }
-                        }
-                    }
-                    5 -> {
-                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2).toLong() and 0xFFFFL
-                        val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2).toLong() and 0xFFFFL
-                        val insn4 = buffer.readUShort(codeOff + 16 + (pc + 3) * 2).toLong() and 0xFFFFL
-                        val insn5 = buffer.readUShort(codeOff + 16 + (pc + 4) * 2).toLong() and 0xFFFFL
-                        val a = (insn ushr 8) and 0xFF
-                        val v = insn2 or (insn3 shl 16) or (insn4 shl 32) or (insn5 shl 48)
-                        hash = mixLong(hash, a.toLong())
-                        hash = mixLong(hash, v)
-                    }
-                    else -> {
-                        hash = mixLong(hash, insn.toLong())
-                    }
-                }
-                pc += len
-            }
-            java.lang.Long.toHexString(hash)
-        } catch (e: Exception) {
-            ""
-        }
-    }
 
     private fun getOpcodeLength(opcode: Int): Int {
         return when (opcode) {
@@ -1532,8 +1331,8 @@ object DexParser {
                             currOff += (mp3 ushr 32).toInt()
 
                             val regCount = if (codeOff != 0) buffer.readUShort(codeOff) else 0
-                            val methodCodeHash = if (codeOff != 0) {
-                                computeMethodCodeHash(
+                            val rawInsns = if (codeOff != 0) {
+                                disassembleMethod(
                                     buffer,
                                     bytes,
                                     codeOff,
@@ -1546,15 +1345,16 @@ object DexParser {
                                     options
                                 )
                             } else {
-                                ""
+                                emptyList()
                             }
+                            val normalizedInsns = normalizeInstructions(rawInsns)
 
                             val mInfo = resolveMethod(lastMethodIdx)
                             methods.add(mInfo.copy(
                                 accessFlags = flags,
-                                codeHash = methodCodeHash,
+                                codeHash = "",
                                 registersCount = regCount,
-                                instructions = emptyList(),
+                                instructions = normalizedInsns,
                                 codeOff = codeOff
                             ))
                         }
@@ -1575,8 +1375,8 @@ object DexParser {
                             currOff += (mp3 ushr 32).toInt()
 
                             val regCount = if (codeOff != 0) buffer.readUShort(codeOff) else 0
-                            val methodCodeHash = if (codeOff != 0) {
-                                computeMethodCodeHash(
+                            val rawInsns = if (codeOff != 0) {
+                                disassembleMethod(
                                     buffer,
                                     bytes,
                                     codeOff,
@@ -1589,58 +1389,20 @@ object DexParser {
                                     options
                                 )
                             } else {
-                                ""
+                                emptyList()
                             }
+                            val normalizedInsns = normalizeInstructions(rawInsns)
 
                             val mInfo = resolveMethod(lastMethodIdx)
                             methods.add(mInfo.copy(
                                 accessFlags = flags,
-                                codeHash = methodCodeHash,
+                                codeHash = "",
                                 registersCount = regCount,
-                                instructions = emptyList(),
+                                instructions = normalizedInsns,
                                 codeOff = codeOff
                             ))
                         }
                     }
-
-                    // Zero-allocation FNV-1a fast 64-bit class signature computation
-                    var classHash = -3750763034362895579L
-                    fun hashString(s: String) {
-                        for (ch in s) {
-                            classHash = (classHash xor ch.code.toLong()) * fnvPrime
-                        }
-                        classHash = (classHash xor ';'.code.toLong()) * fnvPrime
-                    }
-
-                    hashString(className)
-                    hashString(superClassName)
-                    classHash = (classHash xor accessFlags.toLong()) * fnvPrime
-
-                    for (iface in interfaceNames) {
-                        hashString(iface)
-                    }
-
-                    for (f in fields) {
-                        val shouldOmitInitValue = options.ignoreCompilationOptimizations && isDefaultValue(f.typeName, f.initialValue)
-                        hashString(f.name)
-                        hashString(f.typeName)
-                        classHash = (classHash xor f.accessFlags.toLong()) * fnvPrime
-                        if (f.initialValue != null && !shouldOmitInitValue && !options.ignoreFieldInitialValues) {
-                            hashString(f.initialValue)
-                        }
-                    }
-
-                    for (m in methods) {
-                        hashString(m.name)
-                        hashString(m.signature)
-                        classHash = (classHash xor m.accessFlags.toLong()) * fnvPrime
-                        if (!options.ignoreRegisterCount) {
-                            classHash = (classHash xor m.registersCount.toLong()) * fnvPrime
-                        }
-                        hashString(m.codeHash)
-                    }
-
-                    val signature = java.lang.Long.toHexString(classHash)
 
                     val dexClass = DexClass(
                         name = className,
@@ -1648,13 +1410,14 @@ object DexParser {
                         interfaceNames = interfaceNames,
                         fields = fields,
                         methods = methods,
-                        signature = signature,
+                        signature = "",
                         accessFlags = accessFlags.toInt(),
                         dexBytes = bytes,
                         fieldIdsOff = fieldIdsOff,
                         methodIdsOff = methodIdsOff
                     )
-                    result[className] = dexClass
+                    val signature = md5(dexClass.toTextRepresentation(options))
+                    result[className] = dexClass.copy(signature = signature)
                 } catch (e: Exception) {
                     // Fail-safe: ignore failed classes
                 }
