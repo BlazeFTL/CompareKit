@@ -215,12 +215,10 @@ class CompareViewModel : ViewModel() {
         val dir = if (isSource) _sourceDir.value else _modifiedDir.value
         val singleFile = if (isSource) _sourceFile.value else _modifiedFile.value
 
-        val isMultidexRoot = cleanPath.isEmpty() || cleanPath.matches(Regex("(?i)(.*classes\\d*\\.dex|.*\\.dex)"))
-
         if (isZip && zipFile != null && zipFile.exists()) {
-            if (!isMultidexRoot && cleanPath.isNotEmpty()) {
+            if (cleanPath.isNotEmpty()) {
                 val single = FileHelper.getZipEntryBytes(zipFile, cleanPath)
-                return if (single != null) listOf(single) else emptyList()
+                if (single != null) return listOf(single)
             }
             val all = FileHelper.getAllZipDexEntriesBytes(zipFile)
             if (all.isNotEmpty()) return all
@@ -229,11 +227,11 @@ class CompareViewModel : ViewModel() {
         }
 
         if (dir != null && dir.exists()) {
-            if (!isMultidexRoot && cleanPath.isNotEmpty()) {
+            if (cleanPath.isNotEmpty()) {
                 val file = File(dir, cleanPath)
-                return if (file.exists() && file.isFile) {
-                    try { listOf(file.readBytes()) } catch (e: Exception) { emptyList() }
-                } else emptyList()
+                if (file.exists() && file.isFile) {
+                    try { return listOf(file.readBytes()) } catch (e: Exception) { }
+                }
             }
             val all = FileHelper.getAllDirectoryDexBytes(dir)
             if (all.isNotEmpty()) return all
