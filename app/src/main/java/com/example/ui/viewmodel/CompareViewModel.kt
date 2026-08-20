@@ -1291,131 +1291,57 @@ class CompareViewModel : ViewModel() {
         return sb.toString()
     }
 
-    private suspend fun generateFullReportText(list: List<FileCompareStatus>, formatAsTxt: Boolean): String = withContext(Dispatchers.IO) {
-        val total = list.size.coerceAtLeast(1)
+    private suspend fun streamFullReport(
+        writer: java.io.BufferedWriter,
+        changedList: List<FileCompareStatus>,
+        formatAsTxt: Boolean,
+        onProgress: (Float, String) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        val total = changedList.size.coerceAtLeast(1)
         val srcTitle = _sourceFile.value?.name ?: _sourceDir.value?.name ?: "Stock"
         val modTitle = _modifiedFile.value?.name ?: _modifiedDir.value?.name ?: "Modified"
         val isVirtualDex = _activeDexVirtualPath.value != null
 
+        // Write header immediately so file on disk is populated instantly
         if (!formatAsTxt) {
-            val sb = java.lang.StringBuilder()
-            sb.append("# CompareKit Diff Output\n")
-            sb.append("# Generated on: ${java.util.Date()}\n")
-            sb.append("# Stock: $srcTitle\n")
-            sb.append("# Modified: $modTitle\n\n")
-
-            var changedCount = 0
-            for ((index, fileStatus) in list.withIndex()) {
-                if (index % 20 == 0 || index == total - 1) {
-                    _exportProgress.value = index.toFloat() / total
-                    _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
-                }
-
-                if (fileStatus.status == FileStatus.UNCHANGED) continue
-                if (fileStatus.isBinary && !fileStatus.relativePath.lowercase().endsWith(".smali")) {
-                    sb.append("Index: ${fileStatus.relativePath}\n")
-                    sb.append("Binary files $srcTitle/${fileStatus.relativePath} and $modTitle/${fileStatus.relativePath} differ\n\n")
-                    changedCount++
-                    continue
-                }
-
-                val cleanPath = fileStatus.relativePath.removePrefix("/")
-                val origCleanPath = (fileStatus.originalPath ?: fileStatus.relativePath).removePrefix("/")
-
-                val diff = if (isVirtualDex) {
-                    val className = cleanPath.removeSuffix(".smali").replace('/', '.')
-                    val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
-                    val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
-                    val opts = _dexCompareOptions.value
-                    val srcSmali = srcCls?.toTextRepresentation(opts) ?: ""
-                    val modSmali = modCls?.toTextRepresentation(opts) ?: ""
-                    var srcLines = if (srcSmali.isNotEmpty()) srcSmali.lines() else emptyList()
-                    var modLines = if (modSmali.isNotEmpty()) modSmali.lines() else emptyList()
-                    srcLines = DexParser.preprocessSmali(srcLines, opts)
-                    modLines = DexParser.preprocessSmali(modLines, opts)
-                    if (_beautifierEnabled.value) {
-                        val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
-                        val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
-                        srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
-                        modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
-                    }
-                    MyersDiff.diff(srcLines, modLines, _diffOptions.value)
-                } else {
-                    val srcBytes = getFileBytes(isSource = true, origCleanPath) ?: ByteArray(0)
-                    val modBytes = getFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
-
-                    var srcLines = if (srcBytes.isNotEmpty()) {
-                        if (origCleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcBytes)) {
-                            AxmlDecoder.decode(srcBytes).lines()
-                        } else {
-                            String(srcBytes, Charsets.UTF_8).lines()
-                        }
-                    } else emptyList()
-
-                    var modLines = if (modBytes.isNotEmpty()) {
-                        if (cleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(modBytes)) {
-                            AxmlDecoder.decode(modBytes).lines()
-                        } else {
-                            String(modBytes, Charsets.UTF_8).lines()
-                        }
-                    } else emptyList()
-
-                    if (fileStatus.relativePath.lowercase().endsWith(".smali")) {
-                        srcLines = DexParser.preprocessSmali(srcLines, _dexCompareOptions.value)
-                        modLines = DexParser.preprocessSmali(modLines, _dexCompareOptions.value)
-                    }
-
-                    if (_beautifierEnabled.value) {
-                        val srcFormatted = Prettier.formatAuto(fileStatus.relativePath, srcLines.joinToString("\n"))
-                        val modFormatted = Prettier.formatAuto(fileStatus.relativePath, modLines.joinToString("\n"))
-                        srcLines = if (srcFormatted.isNotEmpty()) srcFormatted.split("\n") else emptyList()
-                        modLines = if (modFormatted.isNotEmpty()) modFormatted.split("\n") else emptyList()
-                    }
-
-                    MyersDiff.diff(srcLines, modLines, _diffOptions.value)
-                }
-
-                val fileDiffString = formatUnifiedDiff(fileStatus.relativePath, diff)
-                if (fileDiffString.isNotBlank()) {
-                    sb.append(fileDiffString).append("\n")
-                    changedCount++
-                }
-            }
-            if (changedCount == 0) {
-                sb.append("# No differences found.\n")
-            }
-            _exportProgress.value = 1.0f
-            _exportProgressMsg.value = "Saving full diff report..."
-            delay(150)
-            return@withContext sb.toString()
+            writer.write("# CompareKit Diff Output\n")
+            writer.write("# Generated on: ${java.util.Date()}\n")
+            writer.write("# Stock: $srcTitle\n")
+            writer.write("# Modified: $modTitle\n\n")
+            writer.flush()
+        } else {
+            writer.write("===================================================================\n")
+            writer.write("COMPAREKIT ALL FILES DIFF REPORT\n")
+            writer.write("===================================================================\n")
+            writer.write("Generated on: ${java.util.Date()}\n")
+            writer.write("Stock: $srcTitle\n")
+            writer.write("Modified: $modTitle\n")
+            writer.write("===================================================================\n\n")
+            writer.flush()
         }
 
-        val sb = java.lang.StringBuilder()
-        sb.append("===================================================================\n")
-        sb.append("COMPAREKIT ALL FILES DIFF REPORT\n")
-        sb.append("===================================================================\n")
-        sb.append("Generated on: ${java.util.Date()}\n")
-        sb.append("Stock: $srcTitle\n")
-        sb.append("Modified: $modTitle\n")
-        sb.append("===================================================================\n\n")
-
         var changedCount = 0
-        for ((index, fileStatus) in list.withIndex()) {
-            if (index % 20 == 0 || index == total - 1) {
-                _exportProgress.value = index.toFloat() / total
-                _exportProgressMsg.value = "Comparing ${fileStatus.relativePath}..."
-            }
+        for ((index, fileStatus) in changedList.withIndex()) {
+            val progressVal = (index + 1).toFloat() / total
+            onProgress(progressVal, "Exporting (${index + 1}/$total): ${fileStatus.relativePath}")
 
             if (fileStatus.status == FileStatus.UNCHANGED) continue
             changedCount++
 
-            sb.append("FILE: ${fileStatus.relativePath}\n")
-            sb.append("STATUS: ${fileStatus.status}\n")
-            if (fileStatus.originalPath != null) {
-                sb.append("ORIGINAL PATH: ${fileStatus.originalPath}\n")
-            }
             if (fileStatus.isBinary && !fileStatus.relativePath.lowercase().endsWith(".smali")) {
-                sb.append("Binary files differ.\n\n")
+                if (!formatAsTxt) {
+                    writer.write("Index: ${fileStatus.relativePath}\n")
+                    writer.write("Binary files $srcTitle/${fileStatus.relativePath} and $modTitle/${fileStatus.relativePath} differ\n\n")
+                } else {
+                    writer.write("FILE: ${fileStatus.relativePath}\n")
+                    writer.write("STATUS: ${fileStatus.status}\n")
+                    if (fileStatus.originalPath != null) {
+                        writer.write("ORIGINAL PATH: ${fileStatus.originalPath}\n")
+                    }
+                    writer.write("Binary files differ.\n\n")
+                    writer.write("===================================================================\n\n")
+                }
+                writer.flush()
                 continue
             }
 
@@ -1475,52 +1401,84 @@ class CompareViewModel : ViewModel() {
                 MyersDiff.diff(srcLines, modLines, _diffOptions.value)
             }
 
-            val fileDiffString = generateSingleFileReportText(fileStatus.relativePath, diff, formatAsTxt = true)
-            if (fileDiffString.isNotBlank()) {
-                sb.append(fileDiffString).append("\n")
+            if (!formatAsTxt) {
+                val fileDiffString = formatUnifiedDiff(fileStatus.relativePath, diff)
+                if (fileDiffString.isNotBlank()) {
+                    writer.write(fileDiffString)
+                    writer.write("\n")
+                }
             } else {
-                sb.append("(No textual differences found)\n\n")
+                val fileDiffString = generateSingleFileReportText(fileStatus.relativePath, diff, formatAsTxt = true)
+                if (fileDiffString.isNotBlank()) {
+                    writer.write(fileDiffString)
+                    writer.write("\n")
+                } else {
+                    writer.write("FILE: ${fileStatus.relativePath}\n")
+                    writer.write("STATUS: ${fileStatus.status}\n")
+                    writer.write("(No textual differences found)\n\n")
+                }
+                writer.write("===================================================================\n\n")
             }
-            sb.append("===================================================================\n\n")
+            writer.flush()
         }
 
         if (changedCount == 0) {
-            sb.append("No changed files found.\n")
+            if (!formatAsTxt) {
+                writer.write("# No differences found.\n")
+            } else {
+                writer.write("No changed files found.\n")
+            }
+            writer.flush()
         }
-        _exportProgress.value = 1.0f
-        _exportProgressMsg.value = "Saving full text report..."
-        delay(150)
-        return@withContext sb.toString()
+    }
+
+    private suspend fun generateFullReportText(list: List<FileCompareStatus>, formatAsTxt: Boolean): String = withContext(Dispatchers.IO) {
+        val changedFiles = list.filter { it.status != FileStatus.UNCHANGED }
+        val sw = java.io.StringWriter()
+        val bw = java.io.BufferedWriter(sw)
+        streamFullReport(bw, if (changedFiles.isNotEmpty()) changedFiles else list, formatAsTxt) { progress, msg ->
+            _exportProgress.value = progress
+            _exportProgressMsg.value = msg
+        }
+        bw.flush()
+        return@withContext sw.toString()
     }
 
     fun exportAllDiffs(context: Context, formatAsTxt: Boolean, onComplete: (Boolean, String) -> Unit) {
         val list = _fileList.value
-        if (list.isEmpty()) {
-            onComplete(false, "No compared files found.")
+        val changedFiles = list.filter { it.status != FileStatus.UNCHANGED }
+        if (changedFiles.isEmpty()) {
+            onComplete(false, "No changed files found to export.")
             return
         }
 
         viewModelScope.launch {
-            _exportProgress.value = 0.0f
-            _exportProgressMsg.value = "Initializing export..."
+            _exportProgress.value = 0.01f
+            _exportProgressMsg.value = "Initializing export (${changedFiles.size} files)..."
             _isExportMinimized.value = false
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
-                    val reportText = generateFullReportText(list, formatAsTxt)
                     val ext = if (formatAsTxt) "txt" else "diff"
                     val cacheFile = File(context.cacheDir, "comparekit_all_files.$ext")
                     if (cacheFile.exists()) cacheFile.delete()
-                    cacheFile.writeText(reportText)
+                    
+                    cacheFile.bufferedWriter(Charsets.UTF_8).use { writer ->
+                        streamFullReport(writer, changedFiles, formatAsTxt) { progress, msg ->
+                            _exportProgress.value = progress
+                            _exportProgressMsg.value = msg
+                        }
+                        writer.flush()
+                    }
 
                     val modDir = _modifiedDir.value
                     val parentDir = modDir?.parentFile
                     if (parentDir != null && parentDir.exists() && parentDir.canWrite()) {
                         val localFile = File(parentDir, "comparekit_results.$ext")
-                        localFile.writeText(reportText)
+                        cacheFile.copyTo(localFile, overwrite = true)
                     }
 
                     shareDiffFile(context, cacheFile, "comparekit_all_files.$ext")
-                    "Export completed and saved to storage successfully!"
+                    "Export completed successfully! (${changedFiles.size} files)"
                 } catch (e: Exception) {
                     "Error: ${e.localizedMessage}"
                 }
@@ -1627,32 +1585,35 @@ class CompareViewModel : ViewModel() {
 
     fun exportAllDiffsToUri(context: Context, uri: Uri, formatAsTxt: Boolean, onComplete: (Boolean, String) -> Unit) {
         val list = _fileList.value
-        if (list.isEmpty()) {
-            onComplete(false, "No compared files found.")
+        val changedFiles = list.filter { it.status != FileStatus.UNCHANGED }
+        if (changedFiles.isEmpty()) {
+            onComplete(false, "No changed files found to export.")
             return
         }
 
         viewModelScope.launch {
-            _exportProgress.value = 0.0f
-            _exportProgressMsg.value = "Initializing storage export..."
+            _exportProgress.value = 0.01f
+            _exportProgressMsg.value = "Starting export for ${changedFiles.size} changed files..."
             _isExportMinimized.value = false
             val resultMessage = withContext(Dispatchers.IO) {
                 try {
-                    val reportText = generateFullReportText(list, formatAsTxt)
                     context.contentResolver.openOutputStream(uri, "wt")?.let { rawOut ->
-                        java.io.BufferedOutputStream(rawOut).use { out ->
-                            out.write(reportText.toByteArray(Charsets.UTF_8))
-                            out.flush()
+                        java.io.BufferedWriter(java.io.OutputStreamWriter(rawOut, Charsets.UTF_8)).use { writer ->
+                            streamFullReport(writer, changedFiles, formatAsTxt) { progress, msg ->
+                                _exportProgress.value = progress
+                                _exportProgressMsg.value = msg
+                            }
+                            writer.flush()
                         }
                     }
-                    "Report export completed and saved to storage successfully!"
+                    "Diff export saved successfully (${changedFiles.size} files)"
                 } catch (e: Exception) {
                     "Error: ${e.localizedMessage}"
                 }
             }
             _exportProgress.value = 1.0f
             _exportProgressMsg.value = "Saved successfully!"
-            delay(200)
+            delay(350)
             _exportProgress.value = null
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
@@ -1665,7 +1626,7 @@ class CompareViewModel : ViewModel() {
 
         viewModelScope.launch {
             _exportProgress.value = 0.1f
-            _exportProgressMsg.value = "Preparing file export..."
+            _exportProgressMsg.value = "Preparing file diff for ${selected.relativePath}..."
             _isExportMinimized.value = false
 
             val resultMessage = withContext(Dispatchers.IO) {
@@ -1722,21 +1683,24 @@ class CompareViewModel : ViewModel() {
                         }
                     }
 
+                    _exportProgress.value = 0.6f
+                    _exportProgressMsg.value = "Writing diff report to storage..."
+
                     val reportText = generateSingleFileReportText(selected.relativePath, diffItems, formatAsTxt)
                     context.contentResolver.openOutputStream(uri, "wt")?.let { rawOut ->
-                        java.io.BufferedOutputStream(rawOut).use { out ->
-                            out.write(reportText.toByteArray(Charsets.UTF_8))
-                            out.flush()
+                        java.io.BufferedWriter(java.io.OutputStreamWriter(rawOut, Charsets.UTF_8)).use { writer ->
+                            writer.write(reportText)
+                            writer.flush()
                         }
                     }
-                    "File diff export completed and saved to storage successfully!"
+                    "File diff exported and saved successfully!"
                 } catch (e: Exception) {
                     "Error: ${e.localizedMessage}"
                 }
             }
             _exportProgress.value = 1.0f
             _exportProgressMsg.value = "Saved successfully!"
-            delay(200)
+            delay(350)
             _exportProgress.value = null
             onComplete(!resultMessage.startsWith("Error"), resultMessage)
         }
