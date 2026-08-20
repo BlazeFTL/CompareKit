@@ -267,39 +267,30 @@ class CompareViewModel : ViewModel() {
 
                     val opts = _dexCompareOptions.value
                     
-                    // Parse Source and Modified DEX in parallel (0.05 -> 0.85)
-                    val (srcClasses, modClasses) = coroutineScope {
-                        val srcDeferred = async(Dispatchers.Default) {
-                            val merged = mutableMapOf<String, DexClass>()
-                            val total = srcDexBytesList.size.coerceAtLeast(1)
-                            for ((idx, bytes) in srcDexBytesList.withIndex()) {
-                                if (bytes.isNotEmpty()) {
-                                    val partClasses = DexParser.parse(bytes, opts) { p ->
-                                        val base = 0.05f + (idx.toFloat() / total) * 0.40f
-                                        val step = (1.0f / total) * 0.40f
-                                        _compareProgress.value = base + p * step
-                                    }
-                                    merged.putAll(partClasses)
-                                }
+                    val srcClasses = mutableMapOf<String, DexClass>()
+                    val totalSrc = srcDexBytesList.size.coerceAtLeast(1)
+                    for ((idx, bytes) in srcDexBytesList.withIndex()) {
+                        if (bytes.isNotEmpty()) {
+                            val part = DexParser.parse(bytes, opts) { p ->
+                                val base = 0.05f + (idx.toFloat() / totalSrc) * 0.40f
+                                val step = (1.0f / totalSrc) * 0.40f
+                                _compareProgress.value = base + p * step
                             }
-                            merged
+                            srcClasses.putAll(part)
                         }
-                        val modDeferred = async(Dispatchers.Default) {
-                            val merged = mutableMapOf<String, DexClass>()
-                            val total = modDexBytesList.size.coerceAtLeast(1)
-                            for ((idx, bytes) in modDexBytesList.withIndex()) {
-                                if (bytes.isNotEmpty()) {
-                                    val partClasses = DexParser.parse(bytes, opts) { p ->
-                                        val base = 0.45f + (idx.toFloat() / total) * 0.40f
-                                        val step = (1.0f / total) * 0.40f
-                                        _compareProgress.value = base + p * step
-                                    }
-                                    merged.putAll(partClasses)
-                                }
+                    }
+
+                    val modClasses = mutableMapOf<String, DexClass>()
+                    val totalMod = modDexBytesList.size.coerceAtLeast(1)
+                    for ((idx, bytes) in modDexBytesList.withIndex()) {
+                        if (bytes.isNotEmpty()) {
+                            val part = DexParser.parse(bytes, opts) { p ->
+                                val base = 0.45f + (idx.toFloat() / totalMod) * 0.40f
+                                val step = (1.0f / totalMod) * 0.40f
+                                _compareProgress.value = base + p * step
                             }
-                            merged
+                            modClasses.putAll(part)
                         }
-                        Pair(srcDeferred.await(), modDeferred.await())
                     }
 
                     synchronized(virtualDexSourceClasses) {
