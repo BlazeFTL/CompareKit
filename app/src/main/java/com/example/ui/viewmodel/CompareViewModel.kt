@@ -160,6 +160,18 @@ class CompareViewModel : ViewModel() {
     private val _activeDexVirtualPath = MutableStateFlow<String?>(null)
     val activeDexVirtualPath: StateFlow<String?> = _activeDexVirtualPath.asStateFlow()
 
+    private val _isCombinedMultidex = MutableStateFlow(true)
+    val isCombinedMultidex: StateFlow<Boolean> = _isCombinedMultidex.asStateFlow()
+
+    fun setCombinedMultidex(combined: Boolean) {
+        if (_isCombinedMultidex.value == combined) return
+        _isCombinedMultidex.value = combined
+        val currentVirtual = _activeDexVirtualPath.value
+        if (currentVirtual != null) {
+            openDexVirtualComparison(currentVirtual)
+        }
+    }
+
     private var parentComparisonFileList: List<FileCompareStatus>? = null
 
     private val virtualDexSourceClasses = mutableMapOf<String, DexClass>()
@@ -256,8 +268,9 @@ class CompareViewModel : ViewModel() {
 
             withContext(Dispatchers.IO) {
                 try {
-                    val srcDexFiles = getAllDexFiles(isSource = true, cleanPath)
-                    val modDexFiles = getAllDexFiles(isSource = false, cleanPath)
+                    val targetPath = if (_isCombinedMultidex.value) "" else cleanPath
+                    val srcDexFiles = getAllDexFiles(isSource = true, targetPath)
+                    val modDexFiles = getAllDexFiles(isSource = false, targetPath)
 
                     val opts = _dexCompareOptions.value
                     

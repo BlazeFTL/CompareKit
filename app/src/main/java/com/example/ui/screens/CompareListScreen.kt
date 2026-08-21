@@ -125,6 +125,7 @@ fun CompareListScreen(
     var isTreeViewMode by rememberSaveable { mutableStateOf(true) }
     val lineHeightMultiplier by viewModel.lineHeightMultiplier.collectAsState()
     val activeDexVirtualPath by viewModel.activeDexVirtualPath.collectAsState()
+    val isCombinedMultidex by viewModel.isCombinedMultidex.collectAsState()
 
     val saveAllDiffsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
@@ -968,53 +969,99 @@ fun CompareListScreen(
                                         .padding(horizontal = 16.dp, vertical = 12.dp)
                                 ) {
                                     if (activeDexVirtualPath != null) {
-                                        Row(
+                                        Column(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                FilledTonalButton(
-                                                    onClick = { viewModel.closeDexVirtualComparison() },
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                                        contentColor = MaterialTheme.colorScheme.primary
-                                                    ),
-                                                    modifier = Modifier.height(32.dp)
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                 ) {
-                                                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.size(15.dp))
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Back to APK", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                                }
-                                                Text(
-                                                    "DEX VIRTUAL SMALI",
-                                                    style = TextStyle(
-                                                        fontFamily = FontFamily.Monospace,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        letterSpacing = 1.4.sp,
-                                                        color = MaterialTheme.colorScheme.primary
+                                                    FilledTonalButton(
+                                                        onClick = { viewModel.closeDexVirtualComparison() },
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                                            contentColor = MaterialTheme.colorScheme.primary
+                                                        ),
+                                                        modifier = Modifier.height(32.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.size(15.dp))
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text("Back to APK", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                    Text(
+                                                        "DEX VIRTUAL SMALI",
+                                                        style = TextStyle(
+                                                            fontFamily = FontFamily.Monospace,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = 1.4.sp,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
                                                     )
-                                                )
+                                                }
+
+                                                // Toggle Mode: Multidex (All DEX) vs Single DEX
+                                                Surface(
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(2.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = if (isCombinedMultidex) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                                            modifier = Modifier
+                                                                .clickable { viewModel.setCombinedMultidex(true) }
+                                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "Multidex (All)",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontWeight = if (isCombinedMultidex) FontWeight.Bold else FontWeight.Normal,
+                                                                color = if (isCombinedMultidex) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = if (!isCombinedMultidex) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                                            modifier = Modifier
+                                                                .clickable { viewModel.setCombinedMultidex(false) }
+                                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "Single DEX",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontWeight = if (!isCombinedMultidex) FontWeight.Bold else FontWeight.Normal,
+                                                                color = if (!isCombinedMultidex) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
+
+                                            Text(
+                                                text = if (isCombinedMultidex) "Combined Multi-DEX ($sourceName  ➔  $modifiedName)" else "$activeDexVirtualPath ($sourceName  ➔  $modifiedName)",
+                                                style = TextStyle(
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                ),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = "$activeDexVirtualPath ($sourceName  ➔  $modifiedName)",
-                                            style = TextStyle(
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
                                     } else {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
