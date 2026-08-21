@@ -1052,10 +1052,10 @@ class CompareViewModel : ViewModel() {
         _lineHeightMultiplier.value = sharedPrefs?.getFloat("line_height_multiplier", 1.40f) ?: 1.40f
 
         val ignoreDebugInfo = sharedPrefs?.getBoolean("dex_ignore_debug_info", true) ?: true
-        val ignoreCompilationOptimizations = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", true) ?: true
+        val ignoreCompilationOptimizations = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", false) ?: false
         val ignoreRegisterCount = sharedPrefs?.getBoolean("dex_ignore_register_count", false) ?: false
         val ignoreNopInstruction = sharedPrefs?.getBoolean("dex_ignore_nop", true) ?: true
-        val ignoreFieldInitialValues = sharedPrefs?.getBoolean("dex_ignore_field_initial", true) ?: true
+        val ignoreFieldInitialValues = sharedPrefs?.getBoolean("dex_ignore_field_initial", false) ?: false
 
         _dexCompareOptions.value = DexCompareOptions(
             ignoreDebugInfo = ignoreDebugInfo,

@@ -56,10 +56,10 @@ data class DexClassCompareStatus(
 
 data class DexCompareOptions(
     val ignoreDebugInfo: Boolean = true,
-    val ignoreCompilationOptimizations: Boolean = true,
+    val ignoreCompilationOptimizations: Boolean = false,
     val ignoreRegisterCount: Boolean = false,
     val ignoreNopInstruction: Boolean = true,
-    val ignoreFieldInitialValues: Boolean = true
+    val ignoreFieldInitialValues: Boolean = false
 )
 
 fun formatAccessFlags(flags: Int, isClass: Boolean = false, isMethod: Boolean = false): String {
@@ -381,7 +381,9 @@ object DexParser {
             in 0xb0..0xcf -> 1
             in 0xd0..0xd7 -> 2
             in 0xd8..0xe2 -> 2
-            in 0xfa..0xfb -> 1
+            in 0xfa..0xfb -> 4
+            in 0xfc..0xfd -> 3
+            in 0xfe..0xff -> 2
             else -> 1
         }
     }
@@ -775,6 +777,11 @@ object DexParser {
                                     hash = mixLong(hash, b.toLong())
                                 }
                             }
+                            0xfe, 0xff -> { // const-method-handle, const-method-type
+                                val a = (insn ushr 8) and 0xFF
+                                hash = mixLong(hash, a.toLong())
+                                hash = mixLong(hash, insn2.toLong())
+                            }
                             else -> {
                                 val a = (insn ushr 8) and 0xFF
                                 hash = mixLong(hash, ((a.toLong() shl 16) or (insn2.toLong() and 0xFFFFL)))
@@ -790,6 +797,30 @@ object DexParser {
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
                                 hash = mixLong(hash, a.toLong())
                                 hash = mixString(hash, resolveString(b))
+                            }
+                            0x24 -> { // filled-new-array
+                                val count = (insn ushr 12) and 0xF
+                                val typeIdx = insn2
+                                val reg5 = (insn ushr 8) and 0xF
+                                val reg1 = insn3 and 0xF
+                                val reg2 = (insn3 ushr 4) and 0xF
+                                val reg3 = (insn3 ushr 8) and 0xF
+                                val reg4 = (insn3 ushr 12) and 0xF
+                                var regBits = 0L
+                                if (count >= 1) regBits = regBits or (reg1.toLong() shl 0)
+                                if (count >= 2) regBits = regBits or (reg2.toLong() shl 4)
+                                if (count >= 3) regBits = regBits or (reg3.toLong() shl 8)
+                                if (count >= 4) regBits = regBits or (reg4.toLong() shl 12)
+                                if (count >= 5) regBits = regBits or (reg5.toLong() shl 16)
+                                hash = mixLong(hash, ((count.toLong() shl 20) or regBits))
+                                hash = mixString(hash, resolveType(typeIdx))
+                            }
+                            0x25 -> { // filled-new-array/range
+                                val count = (insn ushr 8) and 0xFF
+                                val typeIdx = insn2
+                                val startReg = insn3
+                                hash = mixLong(hash, ((count.toLong() shl 16) or (startReg.toLong() and 0xFFFFL)))
+                                hash = mixString(hash, resolveType(typeIdx))
                             }
                             0x2a -> { // goto/32
                                 val a = (insn2 and 0xFFFF) or (insn3 shl 16)
@@ -843,6 +874,12 @@ object DexParser {
                                     hash = mixLong(hash, methIdx.toLong())
                                 }
                             }
+                            in 0xfc..0xfd -> { // invoke-custom, invoke-custom/range
+                                val a = (insn ushr 8) and 0xFF
+                                hash = mixLong(hash, a.toLong())
+                                hash = mixLong(hash, insn2.toLong())
+                                hash = mixLong(hash, insn3.toLong())
+                            }
                             else -> {
                                 val a = (insn ushr 8) and 0xFF
                                 hash = mixLong(hash, a.toLong())
@@ -850,6 +887,23 @@ object DexParser {
                                 hash = mixLong(hash, insn3.toLong())
                             }
                         }
+                    }
+                    4 -> { // invoke-polymorphic, invoke-polymorphic/range (0xfa, 0xfb)
+                        val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
+                        val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2)
+                        val insn4 = buffer.readUShort(codeOff + 16 + (pc + 3) * 2)
+                        val methIdx = insn2
+                        if (methIdx in 0 until methodIdsSize) {
+                            val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
+                            val m = resolveMethod(methIdx)
+                            hash = mixString(hash, resolveType(classIdx))
+                            hash = mixString(hash, m.name)
+                            hash = mixString(hash, m.signature)
+                        } else {
+                            hash = mixLong(hash, methIdx.toLong())
+                        }
+                        hash = mixLong(hash, insn3.toLong())
+                        hash = mixLong(hash, insn4.toLong())
                     }
                     5 -> {
                         val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2).toLong() and 0xFFFFL
@@ -1400,6 +1454,25 @@ object DexParser {
                                 val a = (insn2 and 0xFFFF) or (insn3 shl 16)
                                 "goto/32 :label_${offset + a}"
                             }
+                            0x24 -> {
+                                val count = (insn ushr 12) and 0xF
+                                val typeIdx = insn2
+                                val reg5 = (insn ushr 8) and 0xF
+                                val reg1 = insn3 and 0xF
+                                val reg2 = (insn3 ushr 4) and 0xF
+                                val reg3 = (insn3 ushr 8) and 0xF
+                                val reg4 = (insn3 ushr 12) and 0xF
+                                val list = listOf(reg1, reg2, reg3, reg4, reg5)
+                                val args = list.take(count).map { "v$it" }.joinToString(", ")
+                                "filled-new-array {$args}, ${resolveType(typeIdx)}"
+                            }
+                            0x25 -> {
+                                val count = (insn ushr 8) and 0xFF
+                                val typeIdx = insn2
+                                val startReg = insn3
+                                val args = if (count > 0) "v$startReg..v${startReg + count - 1}" else ""
+                                "filled-new-array/range {$args}, ${resolveType(typeIdx)}"
+                            }
                             0x2b, 0x2c, 0x26 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
@@ -1881,13 +1954,43 @@ object DexParser {
                         list
                     } else emptyList()
 
-                    // Parse class annotations
-                    val classAnnotations = if (annotationsOff != 0) {
+                    // Parse annotations directory if present
+                    var classAnnotations = emptyList<DexAnnotationData>()
+                    val fieldAnnotationsMap = mutableMapOf<Int, List<DexAnnotationData>>()
+                    val methodAnnotationsMap = mutableMapOf<Int, List<DexAnnotationData>>()
+
+                    if (annotationsOff != 0) {
                         try {
                             val classAnnOff = buffer.readUInt(annotationsOff)
-                            parseAnnotationSet(buffer, classAnnOff, ::resolveString, ::resolveType, ::formatDescriptor)
-                        } catch (e: Exception) { emptyList() }
-                    } else emptyList()
+                            val fieldsSize = buffer.readUInt(annotationsOff + 4)
+                            val annotatedMethodsSize = buffer.readUInt(annotationsOff + 8)
+
+                            if (classAnnOff != 0) {
+                                classAnnotations = parseAnnotationSet(buffer, classAnnOff, ::resolveString, ::resolveType, ::formatDescriptor)
+                            }
+
+                            var annCurr = annotationsOff + 16
+                            for (i in 0 until fieldsSize) {
+                                val fIdx = buffer.readUInt(annCurr)
+                                val aOff = buffer.readUInt(annCurr + 4)
+                                annCurr += 8
+                                if (aOff != 0) {
+                                    fieldAnnotationsMap[fIdx] = parseAnnotationSet(buffer, aOff, ::resolveString, ::resolveType, ::formatDescriptor)
+                                }
+                            }
+
+                            for (i in 0 until annotatedMethodsSize) {
+                                val mIdx = buffer.readUInt(annCurr)
+                                val aOff = buffer.readUInt(annCurr + 4)
+                                annCurr += 8
+                                if (aOff != 0) {
+                                    methodAnnotationsMap[mIdx] = parseAnnotationSet(buffer, aOff, ::resolveString, ::resolveType, ::formatDescriptor)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Safe fallback
+                        }
+                    }
 
                     // Parse static values if present
                     val staticValues = if (staticValuesOff != 0) {
@@ -1943,7 +2046,8 @@ object DexParser {
 
                             val fInfo = resolveField(lastFieldIdx)
                             val initVal = if (f < staticValues.size) staticValues[f] else null
-                            fields.add(fInfo.copy(accessFlags = flags, initialValue = initVal))
+                            val fAnn = fieldAnnotationsMap[lastFieldIdx] ?: emptyList()
+                            fields.add(fInfo.copy(accessFlags = flags, initialValue = initVal, annotations = fAnn))
                         }
 
                         // Instance fields
@@ -1958,7 +2062,8 @@ object DexParser {
                             currOff += (fp2 ushr 32).toInt()
 
                             val fInfo = resolveField(lastFieldIdx)
-                            fields.add(fInfo.copy(accessFlags = flags))
+                            val fAnn = fieldAnnotationsMap[lastFieldIdx] ?: emptyList()
+                            fields.add(fInfo.copy(accessFlags = flags, annotations = fAnn))
                         }
 
                         // Direct methods
@@ -1997,12 +2102,14 @@ object DexParser {
                             }
 
                             val mInfo = resolveMethod(lastMethodIdx)
+                            val mAnn = methodAnnotationsMap[lastMethodIdx] ?: emptyList()
                             methods.add(mInfo.copy(
                                 accessFlags = flags,
                                 codeHash = methodCodeHash,
                                 registersCount = regCount,
                                 instructions = emptyList(),
-                                codeOff = codeOff
+                                codeOff = codeOff,
+                                annotations = mAnn
                             ))
                         }
 
@@ -2042,12 +2149,14 @@ object DexParser {
                             }
 
                             val mInfo = resolveMethod(lastMethodIdx)
+                            val mAnn = methodAnnotationsMap[lastMethodIdx] ?: emptyList()
                             methods.add(mInfo.copy(
                                 accessFlags = flags,
                                 codeHash = methodCodeHash,
                                 registersCount = regCount,
                                 instructions = emptyList(),
-                                codeOff = codeOff
+                                codeOff = codeOff,
+                                annotations = mAnn
                             ))
                         }
                     }
@@ -2069,6 +2178,17 @@ object DexParser {
                         }
                     }
 
+                    for (ann in classAnnotations) {
+                        if (!options.ignoreDebugInfo || ann.visibility != "system") {
+                            for (i in 0 until ann.visibility.length) classHash = (classHash xor ann.visibility[i].code.toLong()) * fnvPrime
+                            for (i in 0 until ann.type.length) classHash = (classHash xor ann.type[i].code.toLong()) * fnvPrime
+                            for ((k, v) in ann.elements) {
+                                for (i in 0 until k.length) classHash = (classHash xor k[i].code.toLong()) * fnvPrime
+                                for (i in 0 until v.length) classHash = (classHash xor v[i].code.toLong()) * fnvPrime
+                            }
+                        }
+                    }
+
                     val sortedFields = if (options.ignoreCompilationOptimizations) {
                         fields.filter { (it.accessFlags and 0x1000) == 0 }.sortedBy { it.name }
                     } else {
@@ -2085,6 +2205,16 @@ object DexParser {
                         if (!options.ignoreFieldInitialValues && f.initialValue != null) {
                             for (i in 0 until f.initialValue.length) {
                                 classHash = (classHash xor f.initialValue[i].code.toLong()) * fnvPrime
+                            }
+                        }
+                        for (ann in f.annotations) {
+                            if (!options.ignoreDebugInfo || ann.visibility != "system") {
+                                for (i in 0 until ann.visibility.length) classHash = (classHash xor ann.visibility[i].code.toLong()) * fnvPrime
+                                for (i in 0 until ann.type.length) classHash = (classHash xor ann.type[i].code.toLong()) * fnvPrime
+                                for ((k, v) in ann.elements) {
+                                    for (i in 0 until k.length) classHash = (classHash xor k[i].code.toLong()) * fnvPrime
+                                    for (i in 0 until v.length) classHash = (classHash xor v[i].code.toLong()) * fnvPrime
+                                }
                             }
                         }
                     }
@@ -2104,6 +2234,16 @@ object DexParser {
                         classHash = (classHash xor m.accessFlags.toLong()) * fnvPrime
                         for (i in 0 until m.codeHash.length) {
                             classHash = (classHash xor m.codeHash[i].code.toLong()) * fnvPrime
+                        }
+                        for (ann in m.annotations) {
+                            if (!options.ignoreDebugInfo || ann.visibility != "system") {
+                                for (i in 0 until ann.visibility.length) classHash = (classHash xor ann.visibility[i].code.toLong()) * fnvPrime
+                                for (i in 0 until ann.type.length) classHash = (classHash xor ann.type[i].code.toLong()) * fnvPrime
+                                for ((k, v) in ann.elements) {
+                                    for (i in 0 until k.length) classHash = (classHash xor k[i].code.toLong()) * fnvPrime
+                                    for (i in 0 until v.length) classHash = (classHash xor v[i].code.toLong()) * fnvPrime
+                                }
+                            }
                         }
                     }
 
