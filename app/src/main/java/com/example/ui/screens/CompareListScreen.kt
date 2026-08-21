@@ -2137,7 +2137,7 @@ fun ModernFileCompareCard(
                         Button(
                             onClick = onCompare,
                             shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (item.status == FileStatus.UNCHANGED) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
@@ -2150,7 +2150,7 @@ fun ModernFileCompareCard(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (item.status == FileStatus.UNCHANGED) "View DEX" else "Compare DEX",
+                                text = if (item.status == FileStatus.UNCHANGED) "View" else "Diff",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )

@@ -402,32 +402,10 @@ object FileHelper {
             val remainingAdded = candidateAdded.filter { !matchedAdded.contains(it.relativePath) }
 
             val finalResults = (unchangedAndModified + movedResults + remainingDeleted + remainingAdded)
-            return@coroutineScope consolidateMultidexEntries(finalResults).sortedBy { it.relativePath.lowercase() }
+            return@coroutineScope finalResults.sortedBy { it.relativePath.lowercase() }
         }
 
-        return@coroutineScope consolidateMultidexEntries(rawResults).sortedBy { it.relativePath.lowercase() }
-    }
-
-    private fun consolidateMultidexEntries(list: List<FileCompareStatus>): List<FileCompareStatus> {
-        val dexRegex = Regex("(?i)^classes\\d*\\.dex$")
-        val dexEntries = list.filter { it.relativePath.matches(dexRegex) }
-        if (dexEntries.size <= 1) {
-            return list
-        }
-        val nonDexEntries = list.filter { !it.relativePath.matches(dexRegex) }
-        val totalOrigSize = dexEntries.sumOf { it.sizeOriginal }
-        val totalModSize = dexEntries.sumOf { it.sizeModified }
-        val isAnyModified = dexEntries.any { it.status == FileStatus.MODIFIED || it.status == FileStatus.ADDED || it.status == FileStatus.DELETED }
-        val status = if (isAnyModified) FileStatus.MODIFIED else FileStatus.UNCHANGED
-
-        val consolidatedDex = FileCompareStatus(
-            relativePath = "classes.dex",
-            status = status,
-            sizeOriginal = totalOrigSize,
-            sizeModified = totalModSize,
-            isBinary = false
-        )
-        return nonDexEntries + consolidatedDex
+        return@coroutineScope rawResults.sortedBy { it.relativePath.lowercase() }
     }
 
     private fun areZipEntriesContentEqual(
@@ -608,10 +586,10 @@ object FileHelper {
             val remainingAdded = candidateAdded.filter { !matchedAdded.contains(it.relativePath) }
 
             val finalResults = (unchangedAndModified + movedResults + remainingDeleted + remainingAdded)
-            return@coroutineScope consolidateMultidexEntries(finalResults).sortedBy { it.relativePath.lowercase() }
+            return@coroutineScope finalResults.sortedBy { it.relativePath.lowercase() }
         }
 
-        return@coroutineScope consolidateMultidexEntries(rawResults).sortedBy { it.relativePath.lowercase() }
+        return@coroutineScope rawResults.sortedBy { it.relativePath.lowercase() }
     }
 
     private fun areFilesContentEqual(
