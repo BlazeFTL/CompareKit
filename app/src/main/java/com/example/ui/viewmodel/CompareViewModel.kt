@@ -21,6 +21,8 @@ import com.example.file.DexClassCompareStatus
 import com.example.file.DexStatus
 import com.example.file.DexClass
 import com.example.file.DexCompareOptions
+import com.example.file.DexStorageManager
+import com.example.file.DexClassPointer
 import com.example.file.toTextRepresentation
 import com.example.file.ArscParser
 import com.example.file.AxmlDecoder
@@ -208,7 +210,7 @@ class CompareViewModel : ViewModel() {
         _selectedDexClassDetail.value = classStatus
     }
 
-    private fun getAllDexBytes(isSource: Boolean, targetRelativePath: String): List<ByteArray> {
+    private fun getAllDexFiles(isSource: Boolean, targetRelativePath: String): List<File> {
         val cleanPath = targetRelativePath.removePrefix("/").replace('\\', '/')
         val isZip = if (isSource) _sourceIsZip.value else _modifiedIsZip.value
         val zipFile = if (isSource) _sourceFile.value else _modifiedFile.value
@@ -216,26 +218,30 @@ class CompareViewModel : ViewModel() {
         val singleFile = if (isSource) _sourceFile.value else _modifiedFile.value
 
         if (isZip && zipFile != null && zipFile.exists()) {
-            val all = FileHelper.getAllZipDexEntriesBytes(zipFile)
-            if (all.isNotEmpty()) return all
-            val single = FileHelper.getZipEntryBytes(zipFile, cleanPath.ifEmpty { "classes.dex" })
-            return if (single != null) listOf(single) else emptyList()
+            val prefix = if (isSource) "src_dex_" else "mod_dex_"
+            val files = DexStorageManager.streamZipDexToTempFiles(zipFile, prefix)
+            if (files.isNotEmpty()) return files
         }
 
         if (dir != null && dir.exists()) {
-            val all = FileHelper.getAllDirectoryDexBytes(dir)
+            val all = DexStorageManager.collectDirectoryDexFiles(dir)
             if (all.isNotEmpty()) return all
             val file = File(dir, cleanPath.ifEmpty { "classes.dex" })
-            return if (file.exists() && file.isFile) {
-                try { listOf(file.readBytes()) } catch (e: Exception) { emptyList() }
-            } else emptyList()
+            if (file.exists() && file.isFile) return listOf(file)
         }
 
         if (singleFile != null && singleFile.exists() && singleFile.isFile) {
-            return try { listOf(singleFile.readBytes()) } catch (e: Exception) { emptyList() }
+            return listOf(singleFile)
         }
 
         return emptyList()
+    }
+
+    private fun getAllDexBytes(isSource: Boolean, targetRelativePath: String): List<ByteArray> {
+        val files = getAllDexFiles(isSource, targetRelativePath)
+        return files.mapNotNull {
+            try { it.readBytes() } catch (e: Exception) { null }
+        }
     }
 
     fun openDexVirtualComparison(dexRelativePath: String) {
@@ -250,34 +256,56 @@ class CompareViewModel : ViewModel() {
 
             withContext(Dispatchers.IO) {
                 try {
-                    val srcDexBytesList = getAllDexBytes(isSource = true, cleanPath)
-                    val modDexBytesList = getAllDexBytes(isSource = false, cleanPath)
+                    val srcDexFiles = getAllDexFiles(isSource = true, cleanPath)
+                    val modDexFiles = getAllDexFiles(isSource = false, cleanPath)
 
                     val opts = _dexCompareOptions.value
                     
                     val srcClasses = mutableMapOf<String, DexClass>()
-                    val totalSrc = srcDexBytesList.size.coerceAtLeast(1)
-                    for ((idx, bytes) in srcDexBytesList.withIndex()) {
-                        if (bytes.isNotEmpty()) {
-                            val part = DexParser.parse(bytes, opts) { p ->
-                                val base = 0.05f + (idx.toFloat() / totalSrc) * 0.40f
-                                val step = (1.0f / totalSrc) * 0.40f
-                                _compareProgress.value = base + p * step
+                    val totalSrc = srcDexFiles.size.coerceAtLeast(1)
+                    for ((idx, file) in srcDexFiles.withIndex()) {
+                        if (file.exists() && file.length() > 0) {
+                            try {
+                                val bytes = file.readBytes()
+                                val part = DexParser.parse(
+                                    bytes = bytes,
+                                    options = opts,
+                                    onProgress = { p ->
+                                        val base = 0.05f + (idx.toFloat() / totalSrc) * 0.40f
+                                        val step = (1.0f / totalSrc) * 0.40f
+                                        _compareProgress.value = base + p * step
+                                    },
+                                    sourceFile = file,
+                                    retainBytesInClass = false
+                                )
+                                srcClasses.putAll(part)
+                            } catch (e: Exception) {
+                                // continue safely
                             }
-                            srcClasses.putAll(part)
                         }
                     }
 
                     val modClasses = mutableMapOf<String, DexClass>()
-                    val totalMod = modDexBytesList.size.coerceAtLeast(1)
-                    for ((idx, bytes) in modDexBytesList.withIndex()) {
-                        if (bytes.isNotEmpty()) {
-                            val part = DexParser.parse(bytes, opts) { p ->
-                                val base = 0.45f + (idx.toFloat() / totalMod) * 0.40f
-                                val step = (1.0f / totalMod) * 0.40f
-                                _compareProgress.value = base + p * step
+                    val totalMod = modDexFiles.size.coerceAtLeast(1)
+                    for ((idx, file) in modDexFiles.withIndex()) {
+                        if (file.exists() && file.length() > 0) {
+                            try {
+                                val bytes = file.readBytes()
+                                val part = DexParser.parse(
+                                    bytes = bytes,
+                                    options = opts,
+                                    onProgress = { p ->
+                                        val base = 0.45f + (idx.toFloat() / totalMod) * 0.40f
+                                        val step = (1.0f / totalMod) * 0.40f
+                                        _compareProgress.value = base + p * step
+                                    },
+                                    sourceFile = file,
+                                    retainBytesInClass = false
+                                )
+                                modClasses.putAll(part)
+                            } catch (e: Exception) {
+                                // continue safely
                             }
-                            modClasses.putAll(part)
                         }
                     }
 
@@ -295,7 +323,7 @@ class CompareViewModel : ViewModel() {
                     val virtualSmaliList = mutableListOf<FileCompareStatus>()
 
                     for ((idx, className) in allClassNames.withIndex()) {
-                        if (idx % 100 == 0 || idx == allClassNames.size - 1) {
+                        if (idx % 200 == 0 || idx == allClassNames.size - 1) {
                             _compareProgress.value = 0.85f + (idx.toFloat() / totalClasses) * 0.15f
                         }
 
@@ -357,6 +385,7 @@ class CompareViewModel : ViewModel() {
         _diffLines.value = emptyList()
         synchronized(virtualDexSourceClasses) { virtualDexSourceClasses.clear() }
         synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses.clear() }
+        DexStorageManager.clearCache()
     }
 
     fun saveDexCompareOptions(options: DexCompareOptions) {
@@ -612,6 +641,7 @@ class CompareViewModel : ViewModel() {
         _sourceDir.value = null
         _modifiedDir.value = null
         _fileList.value = emptyList()
+        DexStorageManager.clearCache()
     }
 
     fun isDecompiledApkComparison(): Boolean {
@@ -2100,6 +2130,7 @@ class CompareViewModel : ViewModel() {
                 }
             }
             tempDirsToCleanup.clear()
+            DexStorageManager.clearCache()
         }
     }
 }

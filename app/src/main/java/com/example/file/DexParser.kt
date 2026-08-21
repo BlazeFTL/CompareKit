@@ -1690,7 +1690,8 @@ object DexParser {
     fun parse(file: File, options: DexCompareOptions = DexCompareOptions()): Map<String, DexClass> {
         if (!file.exists() || file.isDirectory) return emptyMap()
         return try {
-            parse(file.readBytes(), options)
+            val bytes = file.readBytes()
+            parse(bytes, options, onProgress = null, sourceFile = file)
         } catch (e: Exception) {
             emptyMap()
         }
@@ -1699,7 +1700,9 @@ object DexParser {
     fun parse(
         bytes: ByteArray,
         options: DexCompareOptions = DexCompareOptions(),
-        onProgress: ((progress: Float) -> Unit)? = null
+        onProgress: ((progress: Float) -> Unit)? = null,
+        sourceFile: File? = null,
+        retainBytesInClass: Boolean = false
     ): Map<String, DexClass> {
         val result = mutableMapOf<String, DexClass>()
         if (bytes.size < 0x70) return result
@@ -2115,7 +2118,7 @@ object DexParser {
                         signature = classSig,
                         accessFlags = accessFlags,
                         annotations = classAnnotations,
-                        dexBytes = bytes,
+                        dexBytes = if (retainBytesInClass) bytes else null,
                         fieldIdsOff = fieldIdsOff,
                         methodIdsOff = methodIdsOff
                     )

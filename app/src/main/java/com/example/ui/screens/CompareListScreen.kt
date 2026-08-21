@@ -1441,6 +1441,11 @@ fun CompareListScreen(
                                     )
                                 }
                             } else {
+                                var visibleItemCount by remember(filteredList) { mutableStateOf(100.coerceAtMost(filteredList.size)) }
+                                val displayedItems = remember(filteredList, visibleItemCount) {
+                                    filteredList.take(visibleItemCount)
+                                }
+
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1454,7 +1459,7 @@ fun CompareListScreen(
                                         verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         items(
-                                            items = filteredList,
+                                            items = displayedItems,
                                             key = { it.relativePath }
                                         ) { fileStatus ->
                                             ModernFileCompareCard(
@@ -1468,11 +1473,50 @@ fun CompareListScreen(
                                                 }
                                             )
                                         }
+
+                                        if (visibleItemCount < filteredList.size) {
+                                            item(key = "load_more_pagination_trigger") {
+                                                val remaining = filteredList.size - visibleItemCount
+                                                Surface(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 8.dp),
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clickable {
+                                                                visibleItemCount = (visibleItemCount + 100).coerceAtMost(filteredList.size)
+                                                            }
+                                                            .padding(14.dp),
+                                                        horizontalArrangement = Arrangement.Center,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Refresh,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Text(
+                                                            text = "Load more files ($remaining remaining of ${filteredList.size})",
+                                                            style = MaterialTheme.typography.labelLarge,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
 
                                     MinimapScrollbar(
                                         listState = compareListState,
-                                        items = filteredList,
+                                        items = displayedItems,
                                         modifier = Modifier
                                             .align(Alignment.CenterEnd)
                                             .fillMaxHeight(),
