@@ -219,12 +219,12 @@ class CompareViewModel : ViewModel() {
 
         if (isZip && zipFile != null && zipFile.exists()) {
             val prefix = if (isSource) "src_dex_" else "mod_dex_"
-            val files = DexStorageManager.streamZipDexToTempFiles(zipFile, prefix)
+            val files = DexStorageManager.streamZipDexToTempFiles(zipFile, prefix, specificEntryName = cleanPath.ifEmpty { null })
             if (files.isNotEmpty()) return files
         }
 
         if (dir != null && dir.exists()) {
-            val all = DexStorageManager.collectDirectoryDexFiles(dir)
+            val all = DexStorageManager.collectDirectoryDexFiles(dir, specificFileName = cleanPath.ifEmpty { null })
             if (all.isNotEmpty()) return all
             val file = File(dir, cleanPath.ifEmpty { "classes.dex" })
             if (file.exists() && file.isFile) return listOf(file)

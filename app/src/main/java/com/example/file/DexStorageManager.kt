@@ -32,18 +32,26 @@ object DexStorageManager {
 
     /**
      * Streams DEX entries from a ZIP archive directly to temporary disk files.
+     * If specificEntryName is provided, only extracts that specific DEX file.
      * Returns a list of temporary files on disk without holding byte arrays in heap memory.
      */
-    fun streamZipDexToTempFiles(zipFile: File, prefix: String = "dex_"): List<File> {
+    fun streamZipDexToTempFiles(zipFile: File, prefix: String = "dex_", specificEntryName: String? = null): List<File> {
         if (!zipFile.exists() || !zipFile.isFile) return emptyList()
         val tempFiles = mutableListOf<File>()
         val targetDir = cacheDir ?: File(zipFile.parentFile, "dex_cache").apply { mkdirs() }
 
         try {
             ZipFile(zipFile).use { zip ->
+                val cleanSpecific = specificEntryName?.removePrefix("/")?.replace('\\', '/')
                 val dexEntries = zip.entries().asSequence()
                     .filter { entry ->
-                        !entry.isDirectory && entry.name.removePrefix("/").matches(Regex("(?i)(.*classes\\d*\\.dex|.*\\.dex)"))
+                        if (entry.isDirectory) return@filter false
+                        val name = entry.name.removePrefix("/").replace('\\', '/')
+                        if (cleanSpecific != null && cleanSpecific.isNotEmpty()) {
+                            name.equals(cleanSpecific, ignoreCase = true) || name.endsWith("/$cleanSpecific", ignoreCase = true)
+                        } else {
+                            name.matches(Regex("(?i)(.*classes\\d*\\.dex|.*\\.dex)"))
+                        }
                     }
                     .sortedBy { it.name }
                     .toList()
@@ -65,13 +73,22 @@ object DexStorageManager {
     }
 
     /**
-     * Collects all DEX files from a directory.
+     * Collects all DEX files from a directory, or a specific DEX file if specificFileName is provided.
      */
-    fun collectDirectoryDexFiles(dir: File): List<File> {
+    fun collectDirectoryDexFiles(dir: File, specificFileName: String? = null): List<File> {
         if (!dir.exists() || !dir.isDirectory) return emptyList()
+        val cleanSpecific = specificFileName?.removePrefix("/")?.replace('\\', '/')
         return try {
             dir.walkTopDown()
-                .filter { it.isFile && it.name.lowercase().endsWith(".dex") }
+                .filter { file ->
+                    if (!file.isFile) return@filter false
+                    val relPath = file.relativeTo(dir).path.replace('\\', '/')
+                    if (cleanSpecific != null && cleanSpecific.isNotEmpty()) {
+                        relPath.equals(cleanSpecific, ignoreCase = true) || file.name.equals(cleanSpecific, ignoreCase = true)
+                    } else {
+                        file.name.lowercase().endsWith(".dex")
+                    }
+                }
                 .sortedBy { it.name }
                 .toList()
         } catch (e: Exception) {
