@@ -50,6 +50,7 @@ import com.example.ui.components.CompareKitLogo
 import com.example.ui.components.CompareTreeView
 import com.example.ui.components.DecompiledApkOptionsDialog
 import com.example.ui.components.DiffSettingsDialog
+import com.example.ui.components.ExplorerSortBottomSheet
 import com.example.ui.components.MinimapScrollbar
 import com.example.ui.viewmodel.CompareViewModel
 import com.example.ui.viewmodel.ExplorerSortMode
@@ -111,7 +112,6 @@ fun CompareListScreen(
     var showIgnoreField by remember { mutableStateOf(false) }
 
     var showExplorerSortMenu by remember { mutableStateOf(false) }
-    var sortThisFolderOnly by remember { mutableStateOf(false) }
     var isExplorerSearchVisible by remember { mutableStateOf(false) }
 
     // Witty greeting dynamically chosen on each app open/session
@@ -558,74 +558,17 @@ fun CompareListScreen(
                                     )
                                 }
 
-                                // Sort button & Dropdown Menu
-                                Box {
-                                    IconButton(
-                                        onClick = { showExplorerSortMenu = true },
-                                        modifier = Modifier.size(34.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Sort,
-                                            contentDescription = "Sort Files",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    DropdownMenu(
-                                        expanded = showExplorerSortMenu,
-                                        onDismissRequest = { showExplorerSortMenu = false }
-                                    ) {
-                                        Text(
-                                            "Sort Files (Folders at top)",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                                        )
-                                        for (mode in ExplorerSortMode.entries) {
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        Text(mode.displayName, style = MaterialTheme.typography.bodyMedium)
-                                                        if (explorerSortMode == mode) {
-                                                            Icon(
-                                                                Icons.Default.Check,
-                                                                contentDescription = "Selected",
-                                                                tint = MaterialTheme.colorScheme.primary,
-                                                                modifier = Modifier.size(16.dp)
-                                                            )
-                                                        }
-                                                    }
-                                                },
-                                                onClick = {
-                                                    viewModel.setExplorerSortMode(mode, forThisFolderOnly = sortThisFolderOnly)
-                                                    showExplorerSortMenu = false
-                                                }
-                                            )
-                                        }
-                                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                                        DropdownMenuItem(
-                                            text = {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    modifier = Modifier.fillMaxWidth()
-                                                ) {
-                                                    Checkbox(
-                                                        checked = sortThisFolderOnly,
-                                                        onCheckedChange = { sortThisFolderOnly = it },
-                                                        colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Sort only this folder", style = MaterialTheme.typography.bodySmall)
-                                                }
-                                            },
-                                            onClick = { sortThisFolderOnly = !sortThisFolderOnly }
-                                        )
-                                    }
+                                // Sort button
+                                IconButton(
+                                    onClick = { showExplorerSortMenu = true },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Sort,
+                                        contentDescription = "Sort Files",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
 
                                 IconButton(
@@ -635,6 +578,17 @@ fun CompareListScreen(
                                     Icon(Icons.Default.Close, contentDescription = "Close Picker", modifier = Modifier.size(18.dp))
                                 }
                             }
+                        }
+
+                        if (showExplorerSortMenu) {
+                            ExplorerSortBottomSheet(
+                                currentSortMode = explorerSortMode,
+                                currentFolderName = currentExplorerDir?.name ?: "Storage",
+                                onDismiss = { showExplorerSortMenu = false },
+                                onSelectSortMode = { mode, forThisFolderOnly ->
+                                    viewModel.setExplorerSortMode(mode, forThisFolderOnly = forThisFolderOnly)
+                                }
+                            )
                         }
 
                         // Search Bar (Shown when toggled)

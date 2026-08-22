@@ -447,12 +447,9 @@ class CompareViewModel : ViewModel() {
     private val _explorerSearchQuery = MutableStateFlow("")
     val explorerSearchQuery: StateFlow<String> = _explorerSearchQuery.asStateFlow()
 
+    private val _globalExplorerSortMode = MutableStateFlow(ExplorerSortMode.NAME_ASC)
     private val _explorerSortMode = MutableStateFlow(ExplorerSortMode.NAME_ASC)
     val explorerSortMode: StateFlow<ExplorerSortMode> = _explorerSortMode.asStateFlow()
-
-    // Remembered default sort mode for subfolders (default to SIZE_DESC per user request)
-    private val _subfolderDefaultSortMode = MutableStateFlow(ExplorerSortMode.SIZE_DESC)
-    val subfolderDefaultSortMode: StateFlow<ExplorerSortMode> = _subfolderDefaultSortMode.asStateFlow()
 
     // Folder-specific sort overrides for "sort this folder only"
     private val folderSpecificSort = mutableMapOf<String, ExplorerSortMode>()
@@ -515,12 +512,15 @@ class CompareViewModel : ViewModel() {
     fun initExplorer(context: Context) {
         if (sharedPrefs == null) {
             sharedPrefs = context.getSharedPreferences("comparekit_prefs", Context.MODE_PRIVATE)
-            val savedSubfolderSort = sharedPrefs?.getString("explorer_subfolder_sort_mode", ExplorerSortMode.SIZE_DESC.name)
-            try {
-                _subfolderDefaultSortMode.value = ExplorerSortMode.valueOf(savedSubfolderSort ?: ExplorerSortMode.SIZE_DESC.name)
+            val savedGlobalSort = sharedPrefs?.getString("explorer_global_sort_mode", null)
+                ?: sharedPrefs?.getString("explorer_subfolder_sort_mode", ExplorerSortMode.NAME_ASC.name)
+            val initialSort = try {
+                ExplorerSortMode.valueOf(savedGlobalSort ?: ExplorerSortMode.NAME_ASC.name)
             } catch (e: Exception) {
-                _subfolderDefaultSortMode.value = ExplorerSortMode.SIZE_DESC
+                ExplorerSortMode.NAME_ASC
             }
+            _globalExplorerSortMode.value = initialSort
+            _explorerSortMode.value = initialSort
 
             val savedIgnoreDebug = sharedPrefs?.getBoolean("dex_ignore_debug_info", true) ?: true
             val savedIgnoreCompilation = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", true) ?: true
@@ -552,14 +552,11 @@ class CompareViewModel : ViewModel() {
         if (forThisFolderOnly && currentDir != null) {
             folderSpecificSort[currentDir.absolutePath] = mode
         } else {
-            val isAtRoot = currentDir?.absolutePath == storageRoot.absolutePath
-            if (isAtRoot) {
-                folderSpecificSort[storageRoot.absolutePath] = mode
-            } else {
-                _subfolderDefaultSortMode.value = mode
-                // Persist the user's preferred subfolder sorting mode
-                sharedPrefs?.edit()?.putString("explorer_subfolder_sort_mode", mode.name)?.apply()
-            }
+            _globalExplorerSortMode.value = mode
+            // Persist the user's preferred sorting mode globally across app restarts
+            sharedPrefs?.edit()?.putString("explorer_global_sort_mode", mode.name)?.apply()
+            // Clear specific overrides if setting a global sort preference
+            currentDir?.let { folderSpecificSort.remove(it.absolutePath) }
         }
         _explorerSortMode.value = mode
         refreshExplorer()
@@ -569,9 +566,7 @@ class CompareViewModel : ViewModel() {
         val current = _currentExplorerDir.value ?: return
         try {
             if (current.exists() && current.isDirectory) {
-                val isAtRoot = current.absolutePath == storageRoot.absolutePath
-                val effectiveSortMode = folderSpecificSort[current.absolutePath]
-                    ?: if (isAtRoot) ExplorerSortMode.NAME_ASC else _subfolderDefaultSortMode.value
+                val effectiveSortMode = folderSpecificSort[current.absolutePath] ?: _globalExplorerSortMode.value
                 _explorerSortMode.value = effectiveSortMode
 
                 val files = current.listFiles()?.toList() ?: emptyList()
@@ -1080,7 +1075,7 @@ class CompareViewModel : ViewModel() {
     }
 
     fun loadTheme(context: Context) {
-        sharedPrefs = context.getSharedPreferences("CompareKit_Prefs", Context.MODE_PRIVATE)
+        sharedPrefs = context.getSharedPreferences("comparekit_prefs", Context.MODE_PRIVATE)
         val savedThemeName = sharedPrefs?.getString("app_theme", AppTheme.FOREST.name) ?: AppTheme.FOREST.name
         try {
             _appTheme.value = AppTheme.valueOf(savedThemeName)
@@ -1091,7 +1086,7 @@ class CompareViewModel : ViewModel() {
 
         val ignoreDebugInfo = sharedPrefs?.getBoolean("dex_ignore_debug_info", true) ?: true
         val ignoreCompilationOptimizations = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", true) ?: true
-        val ignoreRegisterCount = sharedPrefs?.getBoolean("dex_ignore_register_count", true) ?: true
+        val ignoreRegisterCount = sharedPrefs?.getBoolean("dex_ignore_register_count", false) ?: false
         val ignoreNopInstruction = sharedPrefs?.getBoolean("dex_ignore_nop", true) ?: true
         val ignoreFieldInitialValues = sharedPrefs?.getBoolean("dex_ignore_field_initial", true) ?: true
 
