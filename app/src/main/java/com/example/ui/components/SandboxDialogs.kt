@@ -725,7 +725,7 @@ fun DecompiledApkOptionsDialog(
         shape = RoundedCornerShape(24.dp),
         title = {
             Text(
-                "APK & Bytecode Options",
+                "APK, DEX & Smali Options",
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleLarge,
                 textAlign = TextAlign.Center

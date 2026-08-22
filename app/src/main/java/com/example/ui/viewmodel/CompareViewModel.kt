@@ -687,26 +687,46 @@ class CompareViewModel : ViewModel() {
     }
 
     fun isDecompiledApkComparison(): Boolean {
+        // If we currently have active DEX virtual smali or comparison results containing .smali / .dex files
+        if (_activeDexVirtualPath.value != null || _dexClassesList.value.isNotEmpty()) {
+            return true
+        }
+        if (_fileList.value.any { 
+            val p = it.relativePath.lowercase()
+            p.endsWith(".smali") || p.endsWith(".dex") || p.contains("smali/")
+        }) {
+            return true
+        }
+
         val src = _sourceFile.value ?: return false
         val mod = _modifiedFile.value ?: return false
         
         fun isDecompiled(file: File): Boolean {
             if (!file.exists()) return false
             val lowerName = file.name.lowercase()
-            if (lowerName.endsWith(".apk") || lowerName.endsWith(".smali") || lowerName.endsWith(".dex")) {
+            if (lowerName.endsWith(".apk") || lowerName.endsWith(".apks") || lowerName.endsWith(".xapk") ||
+                lowerName.endsWith(".smali") || lowerName.endsWith(".dex") || lowerName.endsWith(".aab")) {
                 return true
             }
             if (file.isDirectory) {
-                val hasSmali = File(file, "smali").exists() || file.walkTopDown().maxDepth(3).any { it.extension.lowercase() == "smali" || it.extension.lowercase() == "dex" }
-                val hasManifest = File(file, "AndroidManifest.xml").exists()
-                return hasSmali || hasManifest
-            } else if (lowerName.endsWith(".zip")) {
+                return try {
+                    file.walkTopDown().maxDepth(6).any {
+                        val ext = it.extension.lowercase()
+                        val name = it.name.lowercase()
+                        ext == "smali" || ext == "dex" || name.startsWith("smali") || name == "androidmanifest.xml"
+                    }
+                } catch (e: Exception) {
+                    false
+                }
+            } else if (lowerName.endsWith(".zip") || lowerName.endsWith(".jar")) {
                 try {
                     java.util.zip.ZipFile(file).use { zip ->
                         val entries = zip.entries()
                         while (entries.hasMoreElements()) {
-                            val name = entries.nextElement().name
-                            if (name.startsWith("smali/") || name == "AndroidManifest.xml" || name == "res/" || name.endsWith(".dex")) {
+                            val name = entries.nextElement().name.lowercase()
+                            if (name.endsWith(".smali") || name.contains("smali/") || name.contains("smali_classes") ||
+                                name.endsWith(".dex") || name == "androidmanifest.xml" || name.endsWith("/androidmanifest.xml") ||
+                                name.startsWith("res/") || name.endsWith(".apk")) {
                                 return true
                             }
                         }
