@@ -220,6 +220,10 @@ class CompareViewModel : ViewModel() {
 
     fun selectDexClassDetail(classStatus: DexClassCompareStatus?) {
         _selectedDexClassDetail.value = classStatus
+        if (classStatus != null) {
+            _lineWrapEnabled.value = false
+            _lineHeightMultiplier.value = 0.80f
+        }
     }
 
     private fun getAllDexFiles(isSource: Boolean, targetRelativePath: String): List<File> {
@@ -257,6 +261,8 @@ class CompareViewModel : ViewModel() {
     }
 
     fun openDexVirtualComparison(dexRelativePath: String) {
+        _lineWrapEnabled.value = false
+        _lineHeightMultiplier.value = 0.80f
         viewModelScope.launch {
             _isProcessing.value = true
             _compareProgress.value = 0.05f
@@ -1089,7 +1095,7 @@ class CompareViewModel : ViewModel() {
     }
 
     fun setLineHeightMultiplier(multiplier: Float) {
-        val clamped = multiplier.coerceIn(0.80f, 2.50f)
+        val clamped = (kotlin.math.round(multiplier * 20f) / 20f).coerceIn(0.50f, 2.50f)
         _lineHeightMultiplier.value = clamped
         sharedPrefs?.edit()?.putFloat("line_height_multiplier", clamped)?.apply()
     }
@@ -1179,6 +1185,12 @@ class CompareViewModel : ViewModel() {
         _activeFileSearchQuery.value = ""
         _selectedDexClassDetail.value = null
         if (fileStatus != null) {
+            val pathLower = fileStatus.relativePath.lowercase()
+            val isSmaliOrDex = pathLower.endsWith(".smali") || pathLower.endsWith(".dex") || _activeDexVirtualPath.value != null
+            if (isSmaliOrDex) {
+                _lineWrapEnabled.value = false
+                _lineHeightMultiplier.value = 0.80f
+            }
             loadDiffForFile(fileStatus)
         } else {
             _diffLines.value = emptyList()

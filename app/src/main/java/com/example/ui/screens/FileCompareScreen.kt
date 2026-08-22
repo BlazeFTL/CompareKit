@@ -55,6 +55,7 @@ fun FileCompareScreen(
     val diffOptions by viewModel.diffOptions.collectAsState()
     val beautifierEnabled by viewModel.beautifierEnabled.collectAsState()
     val dexCompareOptions by viewModel.dexCompareOptions.collectAsState()
+    val activeDexVirtualPath by viewModel.activeDexVirtualPath.collectAsState()
     val selectedDexClassDetail by viewModel.selectedDexClassDetail.collectAsState()
 
     val focusModeEnabled by viewModel.focusModeEnabled.collectAsState()
@@ -79,7 +80,20 @@ fun FileCompareScreen(
         }
     }
     var showMenu by remember { mutableStateOf(false) }
-    var fontSize by remember { mutableStateOf(13f) }
+    val isSmaliOrDex = remember(selectedFile, activeDexVirtualPath) {
+        val pathLower = selectedFile?.relativePath?.lowercase() ?: ""
+        pathLower.endsWith(".smali") || pathLower.endsWith(".dex") || activeDexVirtualPath != null
+    }
+
+    var fontSize by remember(selectedFile) {
+        mutableStateOf(if (isSmaliOrDex) 9f else 13f)
+    }
+
+    LaunchedEffect(selectedFile) {
+        if (isSmaliOrDex) {
+            fontSize = 9f
+        }
+    }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showFocusFilterDialog by remember { mutableStateOf(false) }
 
@@ -560,7 +574,7 @@ fun FileCompareScreen(
                                         ) {
                                             FilledTonalIconButton(
                                                 onClick = {
-                                                    val newMultiplier = (kotlin.math.round((lineHeightMultiplier - 0.15f) * 20f) / 20f).coerceIn(0.80f, 2.20f)
+                                                    val newMultiplier = (kotlin.math.round((lineHeightMultiplier - 0.10f) * 20f) / 20f).coerceIn(0.50f, 2.20f)
                                                     viewModel.setLineHeightMultiplier(newMultiplier)
                                                 },
                                                 modifier = Modifier.size(28.dp),
@@ -579,7 +593,7 @@ fun FileCompareScreen(
 
                                             FilledTonalIconButton(
                                                 onClick = {
-                                                    val newMultiplier = (kotlin.math.round((lineHeightMultiplier + 0.15f) * 20f) / 20f).coerceIn(0.80f, 2.20f)
+                                                    val newMultiplier = (kotlin.math.round((lineHeightMultiplier + 0.10f) * 20f) / 20f).coerceIn(0.50f, 2.20f)
                                                     viewModel.setLineHeightMultiplier(newMultiplier)
                                                 },
                                                 modifier = Modifier.size(28.dp),
@@ -1083,7 +1097,7 @@ fun FileCompareScreen(
                                         val newFontSize = (fontSize * zoomFactor).coerceIn(4f, 40f)
                                         fontSize = newFontSize
                                         // Also dynamically adjust line height multiplier along with font size
-                                        val newMultiplier = (lineHeightMultiplier * (1f + (zoomFactor - 1f) * 0.35f)).coerceIn(0.65f, 2.0f)
+                                        val newMultiplier = (lineHeightMultiplier * (1f + (zoomFactor - 1f) * 0.35f)).coerceIn(0.50f, 2.20f)
                                         viewModel.setLineHeightMultiplier(newMultiplier)
                                         event.changes.forEach { it.consume() }
                                     }

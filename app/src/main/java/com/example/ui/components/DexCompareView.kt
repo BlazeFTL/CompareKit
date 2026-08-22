@@ -255,7 +255,8 @@ fun DexCompareView(
             var viewMode by remember { mutableStateOf(DiffViewMode.UNIFIED) }
             var lineWrapEnabled by remember { mutableStateOf(false) }
             var showLineNumbers by remember { mutableStateOf(true) }
-            var fontSize by remember { mutableStateOf(12f) }
+            var fontSize by remember { mutableStateOf(9f) }
+            val lineHeightMultiplier by viewModel.lineHeightMultiplier.collectAsState()
             var showMenu by remember { mutableStateOf(false) }
             val detailListState = rememberLazyListState()
 
@@ -652,6 +653,7 @@ fun DexCompareView(
                             listState = detailListState,
                             lineWrap = lineWrapEnabled,
                             fontSizeSp = fontSize,
+                            lineHeightMultiplier = lineHeightMultiplier,
                             showLineNumbers = showLineNumbers,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -663,6 +665,7 @@ fun DexCompareView(
                             listState = detailListState,
                             lineWrap = lineWrapEnabled,
                             fontSizeSp = fontSize,
+                            lineHeightMultiplier = lineHeightMultiplier,
                             showLineNumbers = showLineNumbers,
                             modifier = Modifier.fillMaxSize()
                         )

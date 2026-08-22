@@ -363,8 +363,8 @@ private fun CellView(
     val effectiveLineNumFontSize = (fontSizeSp * 0.85f).coerceAtLeast(3.5f)
 
     val effectiveLineHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).sp
-    val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.35f).dp
-    val verticalLinePadding = (fontSizeSp * 0.15f * lineHeightMultiplier).coerceAtLeast(2f).dp
+    val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).dp
+    val verticalLinePadding = (fontSizeSp * 0.08f * lineHeightMultiplier).coerceAtLeast(0.5f).dp
 
     val monoCodeStyle = TextStyle(
         fontSize = fontSizeSp.sp,
