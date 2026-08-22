@@ -40,7 +40,8 @@ data class DexClass(
     val annotations: List<DexAnnotationData> = emptyList(),
     val dexBytes: ByteArray? = null,
     val fieldIdsOff: Int = 0,
-    val methodIdsOff: Int = 0
+    val methodIdsOff: Int = 0,
+    val sourceFile: File? = null
 )
 
 enum class DexStatus {
@@ -56,31 +57,42 @@ data class DexClassCompareStatus(
 
 data class DexCompareOptions(
     val ignoreDebugInfo: Boolean = true,
-    val ignoreCompilationOptimizations: Boolean = false,
+    val ignoreCompilationOptimizations: Boolean = true,
     val ignoreRegisterCount: Boolean = false,
     val ignoreNopInstruction: Boolean = true,
-    val ignoreFieldInitialValues: Boolean = false
+    val ignoreFieldInitialValues: Boolean = true
 )
 
-fun formatAccessFlags(flags: Int, isClass: Boolean = false, isMethod: Boolean = false): String {
-    val sb = StringBuilder()
-    if (flags and 0x0001 != 0) sb.append("public ")
-    if (flags and 0x0002 != 0) sb.append("private ")
-    if (flags and 0x0004 != 0) sb.append("protected ")
-    if (flags and 0x0008 != 0) sb.append("static ")
-    if (flags and 0x0010 != 0) sb.append("final ")
-    if (isClass) {
-        if (flags and 0x0200 != 0) sb.append("interface ")
-        if (flags and 0x4000 != 0) sb.append("enum ")
-        if (flags and 0x0400 != 0) sb.append("abstract ")
-    } else if (isMethod) {
-        if (flags and 0x0100 != 0) sb.append("native ")
-        if (flags and 0x0020 != 0) sb.append("synchronized ")
-        if (flags and 0x0400 != 0) sb.append("abstract ")
-    } else {
-        if (flags and 0x0400 != 0) sb.append("abstract ")
+fun formatAccessFlags(flags: Int, isClass: Boolean = false, isMethod: Boolean = false, methodName: String = ""): String {
+    val list = mutableListOf<String>()
+    if (flags and 0x0001 != 0) list.add("public")
+    if (flags and 0x0002 != 0) list.add("private")
+    if (flags and 0x0004 != 0) list.add("protected")
+    if (flags and 0x0008 != 0) list.add("static")
+    if (flags and 0x0010 != 0) list.add("final")
+    if (flags and 0x0020 != 0) {
+        if (isClass) list.add("super")
+        else if (isMethod) list.add("synchronized")
     }
-    return sb.toString().trim()
+    if (flags and 0x0040 != 0) {
+        if (!isMethod && !isClass) list.add("volatile")
+        else if (isMethod) list.add("bridge")
+    }
+    if (flags and 0x0080 != 0) {
+        if (!isMethod && !isClass) list.add("transient")
+        else if (isMethod) list.add("varargs")
+    }
+    if (flags and 0x0100 != 0 && isMethod) list.add("native")
+    if (flags and 0x0200 != 0 && isClass) list.add("interface")
+    if (flags and 0x0400 != 0) list.add("abstract")
+    if (flags and 0x0800 != 0 && isMethod) list.add("strictfp")
+    if (flags and 0x1000 != 0) list.add("synthetic")
+    if (flags and 0x2000 != 0 && isClass) list.add("annotation")
+    if (flags and 0x4000 != 0 && isClass) list.add("enum")
+    if (isMethod && (methodName == "<init>" || methodName == "<clinit>")) {
+        list.add("constructor")
+    }
+    return list.joinToString(" ")
 }
 
 fun toDescriptor(name: String): String {
@@ -106,6 +118,15 @@ fun toDescriptor(name: String): String {
             }
         }
     }
+}
+
+fun parseParamTypesFromSignature(signature: String): List<String> {
+    val start = signature.indexOf('(')
+    val end = signature.indexOf(')')
+    if (start == -1 || end == -1 || end <= start + 1) return emptyList()
+    val paramStr = signature.substring(start + 1, end).trim()
+    if (paramStr.isEmpty()) return emptyList()
+    return paramStr.split(", ")
 }
 
 fun toSmaliSignature(signature: String): String {
@@ -137,30 +158,58 @@ fun isDefaultValue(type: String, value: String?): Boolean {
     }
 }
 
+fun isIgnoredAnnotation(annotationType: String, options: DexCompareOptions): Boolean {
+    val desc = toDescriptor(annotationType)
+    if (desc == "Lkotlin/Metadata;" || desc == "Ldalvik/annotation/SourceDebugExtension;") {
+        return true
+    }
+    if (options.ignoreCompilationOptimizations) {
+        if (desc == "Ldalvik/annotation/MemberClasses;" ||
+            desc == "Ldalvik/annotation/InnerClass;" ||
+            desc == "Ldalvik/annotation/EnclosingClass;" ||
+            desc == "Ldalvik/annotation/EnclosingMethod;"
+        ) {
+            return true
+        }
+    }
+    return false
+}
+
+fun isCompilerSyntheticHelper(method: DexMethodData): Boolean {
+    if (method.name.startsWith("access$")) return true
+    if ((method.accessFlags and 0x1000) != 0 || (method.accessFlags and 0x0040) != 0) return true
+    return false
+}
+
 fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions()): String {
     val sb = StringBuilder()
     val classModifiers = formatAccessFlags(this.accessFlags, isClass = true)
-    sb.append(".class ").append(classModifiers).append(" ").append(toDescriptor(this.name)).append("\n")
+    val classModPrefix = if (classModifiers.isNotEmpty()) "$classModifiers " else ""
+    sb.append(".class ").append(classModPrefix).append(toDescriptor(this.name)).append("\n")
     sb.append(".super ").append(toDescriptor(this.superClassName)).append("\n")
     for (iface in this.interfaceNames) {
         sb.append(".implements ").append(toDescriptor(iface)).append("\n")
     }
+    sb.append("\n")
 
-    if (this.annotations.isNotEmpty()) {
-        for (ann in this.annotations) {
-            sb.append(".annotation ").append(ann.visibility).append(" ").append(ann.type).append("\n")
+    val visibleClassAnns = this.annotations.filter { !isIgnoredAnnotation(it.type, options) }
+    if (visibleClassAnns.isNotEmpty()) {
+        sb.append("# annotations\n")
+        for (ann in visibleClassAnns) {
+            sb.append(".annotation ").append(ann.visibility).append(" ").append(toDescriptor(ann.type)).append("\n")
             for ((k, v) in ann.elements) {
                 sb.append("    ").append(k).append(" = ").append(v).append("\n")
             }
             sb.append(".end annotation\n")
         }
+        sb.append("\n")
     }
-    sb.append("\n")
 
     var staticFields = this.fields.filter { it.accessFlags and 0x0008 != 0 }
     var instanceFields = this.fields.filter { it.accessFlags and 0x0008 == 0 }
-    
-    val fullMethods = if (this.dexBytes != null && this.methods.any { it.instructions.isEmpty() && it.codeOff != 0 }) {
+
+    val fullMethods = if ((this.dexBytes != null || (this.sourceFile != null && this.sourceFile.exists())) &&
+        this.methods.any { it.instructions.isEmpty() && it.codeOff != 0 }) {
         DexParser.disassembleClassMethods(this, options)
     } else {
         this.methods
@@ -170,21 +219,23 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
     if (options.ignoreCompilationOptimizations) {
         staticFields = staticFields.filter { (it.accessFlags and 0x1000) == 0 }.sortedBy { it.name }
         instanceFields = instanceFields.filter { (it.accessFlags and 0x1000) == 0 }.sortedBy { it.name }
-        methodsList = methodsList.filter { (it.accessFlags and 0x1000) == 0 && (it.accessFlags and 0x0040) == 0 }.sortedBy { it.name + it.signature }
+        methodsList = methodsList.filter { !isCompilerSyntheticHelper(it) }.sortedBy { it.name + it.signature }
     }
 
     if (staticFields.isNotEmpty()) {
         sb.append("# static fields\n")
         for (f in staticFields) {
             val mods = formatAccessFlags(f.accessFlags)
+            val modPrefix = if (mods.isNotEmpty()) "$mods " else ""
             val shouldOmitInitValue = options.ignoreCompilationOptimizations && isDefaultValue(f.typeName, f.initialValue)
-            sb.append(".field ").append(mods).append(" ").append(f.name).append(":").append(toDescriptor(f.typeName))
+            sb.append(".field ").append(modPrefix).append(f.name).append(":").append(toDescriptor(f.typeName))
             if (f.initialValue != null && !shouldOmitInitValue && !options.ignoreFieldInitialValues) {
                 sb.append(" = ").append(f.initialValue)
             }
             sb.append("\n")
-            for (ann in f.annotations) {
-                sb.append("    .annotation ").append(ann.visibility).append(" ").append(ann.type).append("\n")
+            val fAnns = f.annotations.filter { !isIgnoredAnnotation(it.type, options) }
+            for (ann in fAnns) {
+                sb.append("    .annotation ").append(ann.visibility).append(" ").append(toDescriptor(ann.type)).append("\n")
                 for ((k, v) in ann.elements) {
                     sb.append("        ").append(k).append(" = ").append(v).append("\n")
                 }
@@ -198,9 +249,11 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
         sb.append("# instance fields\n")
         for (f in instanceFields) {
             val mods = formatAccessFlags(f.accessFlags)
-            sb.append(".field ").append(mods).append(" ").append(f.name).append(":").append(toDescriptor(f.typeName)).append("\n")
-            for (ann in f.annotations) {
-                sb.append("    .annotation ").append(ann.visibility).append(" ").append(ann.type).append("\n")
+            val modPrefix = if (mods.isNotEmpty()) "$mods " else ""
+            sb.append(".field ").append(modPrefix).append(f.name).append(":").append(toDescriptor(f.typeName)).append("\n")
+            val fAnns = f.annotations.filter { !isIgnoredAnnotation(it.type, options) }
+            for (ann in fAnns) {
+                sb.append("    .annotation ").append(ann.visibility).append(" ").append(toDescriptor(ann.type)).append("\n")
                 for ((k, v) in ann.elements) {
                     sb.append("        ").append(k).append(" = ").append(v).append("\n")
                 }
@@ -210,32 +263,53 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
         sb.append("\n")
     }
 
-    if (methodsList.isNotEmpty()) {
-        sb.append("# methods\n")
-        for (m in methodsList) {
-            val mods = formatAccessFlags(m.accessFlags, isMethod = true)
-            sb.append(".method ").append(mods).append(" ").append(m.name).append(toSmaliSignature(m.signature)).append("\n")
-            if (!options.ignoreRegisterCount && m.registersCount > 0) {
-                sb.append("    .registers ").append(m.registersCount).append("\n")
-            }
-            for (ann in m.annotations) {
-                sb.append("    .annotation ").append(ann.visibility).append(" ").append(ann.type).append("\n")
-                for ((k, v) in ann.elements) {
-                    sb.append("        ").append(k).append(" = ").append(v).append("\n")
-                }
-                sb.append("    .end annotation\n")
-            }
-            if (m.instructions.isNotEmpty()) {
-                for (insn in m.instructions) {
-                    sb.append("    ").append(insn).append("\n")
-                }
-            } else if (m.codeHash.isNotEmpty()) {
-                sb.append("    # bytecode hash: ").append(m.codeHash).append("\n")
-            }
-            sb.append(".end method\n\n")
+    val directMethods = methodsList.filter {
+        (it.accessFlags and 0x0008 != 0) || (it.accessFlags and 0x0002 != 0) || it.name == "<init>" || it.name == "<clinit>"
+    }
+    val virtualMethods = methodsList.filter {
+        !((it.accessFlags and 0x0008 != 0) || (it.accessFlags and 0x0002 != 0) || it.name == "<init>" || it.name == "<clinit>")
+    }
+
+    if (directMethods.isNotEmpty()) {
+        sb.append("# direct methods\n")
+        for (m in directMethods) {
+            renderMethod(sb, m, options)
         }
     }
+
+    if (virtualMethods.isNotEmpty()) {
+        sb.append("# virtual methods\n")
+        for (m in virtualMethods) {
+            renderMethod(sb, m, options)
+        }
+    }
+
     return sb.toString().trim()
+}
+
+private fun renderMethod(sb: StringBuilder, m: DexMethodData, options: DexCompareOptions) {
+    val mods = formatAccessFlags(m.accessFlags, isMethod = true, methodName = m.name)
+    val modPrefix = if (mods.isNotEmpty()) "$mods " else ""
+    sb.append(".method ").append(modPrefix).append(m.name).append(toSmaliSignature(m.signature)).append("\n")
+    if (!options.ignoreRegisterCount && m.registersCount > 0) {
+        sb.append("    .registers ").append(m.registersCount).append("\n\n")
+    }
+    val mAnns = m.annotations.filter { !isIgnoredAnnotation(it.type, options) }
+    for (ann in mAnns) {
+        sb.append("    .annotation ").append(ann.visibility).append(" ").append(toDescriptor(ann.type)).append("\n")
+        for ((k, v) in ann.elements) {
+            sb.append("        ").append(k).append(" = ").append(v).append("\n")
+        }
+        sb.append("    .end annotation\n")
+    }
+    if (m.instructions.isNotEmpty()) {
+        for (insn in m.instructions) {
+            sb.append("    ").append(insn).append("\n")
+        }
+    } else if (m.codeHash.isNotEmpty()) {
+        sb.append("    # bytecode hash: ").append(m.codeHash).append("\n")
+    }
+    sb.append(".end method\n\n")
 }
 
 class DexBuffer(val bytes: ByteArray) {
@@ -966,7 +1040,7 @@ object DexParser {
     }
 
     fun disassembleClassMethods(cls: DexClass, options: DexCompareOptions = DexCompareOptions()): List<DexMethodData> {
-        val bytes = cls.dexBytes ?: return cls.methods
+        val bytes = cls.dexBytes ?: cls.sourceFile?.let { if (it.exists()) it.readBytes() else null } ?: return cls.methods
         val buffer = DexBuffer(bytes)
         val stringIdsSize = buffer.readUInt(56)
         val stringIdsOff = buffer.readUInt(60)
@@ -1072,19 +1146,22 @@ object DexParser {
 
         return cls.methods.map { m ->
             if (m.codeOff != 0) {
+                val paramTypes = parseParamTypesFromSignature(m.signature)
                 val insns = disassembleMethod(
-                    buffer,
-                    bytes,
-                    m.codeOff,
-                    ::resolveString,
-                    ::resolveType,
-                    ::resolveField,
-                    ::resolveMethod,
-                    fieldIdsOff,
-                    fieldIdsSize,
-                    methodIdsOff,
-                    methodIdsSize,
-                    options
+                    buffer = buffer,
+                    bytes = bytes,
+                    codeOff = m.codeOff,
+                    mAccessFlags = m.accessFlags,
+                    paramTypes = paramTypes,
+                    resolveString = ::resolveString,
+                    resolveType = ::resolveType,
+                    resolveField = ::resolveField,
+                    resolveMethod = ::resolveMethod,
+                    fieldIdsOff = fieldIdsOff,
+                    fieldIdsSize = fieldIdsSize,
+                    methodIdsOff = methodIdsOff,
+                    methodIdsSize = methodIdsSize,
+                    options = options
                 )
                 m.copy(instructions = insns)
             } else {
@@ -1097,6 +1174,8 @@ object DexParser {
         buffer: DexBuffer,
         bytes: ByteArray,
         codeOff: Int,
+        mAccessFlags: Int,
+        paramTypes: List<String>,
         resolveString: (Int) -> String,
         resolveType: (Int) -> String,
         resolveField: (Int) -> DexFieldData,
@@ -1108,8 +1187,27 @@ object DexParser {
         options: DexCompareOptions
     ): List<String> {
         if (codeOff == 0) return emptyList()
+        val registersSize = buffer.readUShort(codeOff)
         val insnsSize = buffer.readUInt(codeOff + 12)
         if (insnsSize <= 0 || codeOff + 16 + insnsSize * 2 > bytes.size) return emptyList()
+
+        val isStatic = (mAccessFlags and 0x0008) != 0
+        var totalParamRegs = if (isStatic) 0 else 1
+        for (p in paramTypes) {
+            if (p == "long" || p == "double" || p == "J" || p == "D") {
+                totalParamRegs += 2
+            } else {
+                totalParamRegs += 1
+            }
+        }
+        val firstParamReg = if (registersSize > 0) registersSize - totalParamRegs else -1
+
+        fun formatReg(r: Int): String {
+            if (firstParamReg >= 0 && r >= firstParamReg) {
+                return "p${r - firstParamReg}"
+            }
+            return "v$r"
+        }
 
         // Pass 1: Identify all branch & handler target offsets
         val targetPcs = mutableSetOf<Int>()
@@ -1216,7 +1314,7 @@ object DexParser {
                     val addr = (pAddr and 0xFFFFFFFFL).toInt()
                     currH += (pAddr ushr 32).toInt()
                     targetPcs.add(addr)
-                    val expType = resolveType(typeIdx)
+                    val expType = toDescriptor(resolveType(typeIdx))
                     catchDirectives.add(".catch $expType {:label_$startAddr .. :label_${startAddr + insnCount}} :label_$addr")
                 }
                 if (hSize <= 0) {
@@ -1296,23 +1394,23 @@ object DexParser {
                             0x01, 0x04, 0x07 -> {
                                 val a = (insn ushr 8) and 0xF
                                 val b = (insn ushr 12) and 0xF
-                                "$name v$a, v$b"
+                                "$name ${formatReg(a)}, ${formatReg(b)}"
                             }
                             0x0a, 0x0b, 0x0c, 0x0d, 0x0f, 0x10, 0x11, 0x1d, 0x1e, 0x27 -> {
                                 val a = (insn ushr 8) and 0xFF
-                                "$name v$a"
+                                "$name ${formatReg(a)}"
                             }
                             0x0e -> "return-void"
                             0x12 -> {
                                 val a = (insn ushr 8) and 0xF
                                 var b = (insn ushr 12) and 0xF
                                 if (b > 7) b -= 16
-                                "$name v$a, $b"
+                                "$name ${formatReg(a)}, $b"
                             }
                             0x21 -> {
                                 val a = (insn ushr 8) and 0xF
                                 val b = (insn ushr 12) and 0xF
-                                "$name v$a, v$b"
+                                "$name ${formatReg(a)}, ${formatReg(b)}"
                             }
                             0x28 -> {
                                 var a = (insn ushr 8) and 0xFF
@@ -1322,7 +1420,7 @@ object DexParser {
                             in 0x7b..0x8f, in 0xb0..0xcf -> {
                                 val a = (insn ushr 8) and 0xF
                                 val b = (insn ushr 12) and 0xF
-                                "$name v$a, v$b"
+                                "$name ${formatReg(a)}, ${formatReg(b)}"
                             }
                             else -> name
                         }
@@ -1333,34 +1431,39 @@ object DexParser {
                             0x02, 0x05, 0x08 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2
-                                "$name v$a, v$b"
+                                "$name ${formatReg(a)}, ${formatReg(b)}"
                             }
                             0x13, 0x16 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2.toShort().toInt()
-                                "$name v$a, $b"
+                                "$name ${formatReg(a)}, $b"
                             }
                             0x15, 0x19 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2.toShort().toInt()
-                                "$name v$a, $b"
+                                "$name ${formatReg(a)}, 0x${Integer.toHexString(b shl 16)}"
                             }
                             0x1a -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2
-                                val str = resolveString(b).replace("\n", "\\n").replace("\r", "\\r")
-                                "$name v$a, \"$str\""
+                                val str = resolveString(b)
+                                    .replace("\\", "\\\\")
+                                    .replace("\"", "\\\"")
+                                    .replace("\n", "\\n")
+                                    .replace("\r", "\\r")
+                                    .replace("\t", "\\t")
+                                "$name ${formatReg(a)}, \"$str\""
                             }
                             0x1c, 0x1f, 0x22 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2
-                                "$name v$a, ${resolveType(b)}"
+                                "$name ${formatReg(a)}, ${toDescriptor(resolveType(b))}"
                             }
                             0x20, 0x23 -> {
                                 val a = (insn ushr 8) and 0xF
                                 val b = (insn ushr 12) and 0xF
                                 val c = insn2
-                                "$name v$a, v$b, ${resolveType(c)}"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, ${toDescriptor(resolveType(c))}"
                             }
                             0x29 -> {
                                 val a = insn2.toShort().toInt()
@@ -1370,24 +1473,24 @@ object DexParser {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2 and 0xFF
                                 val c = insn2 ushr 8
-                                "$name v$a, v$b, v$c"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, ${formatReg(c)}"
                             }
                             in 0x32..0x37 -> {
                                 val a = (insn ushr 8) and 0xF
                                 val b = (insn ushr 12) and 0xF
                                 val c = insn2.toShort().toInt()
-                                "$name v$a, v$b, :label_${offset + c}"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, :label_${offset + c}"
                             }
                             in 0x38..0x3d -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2.toShort().toInt()
-                                "$name v$a, :label_${offset + b}"
+                                "$name ${formatReg(a)}, :label_${offset + b}"
                             }
                             in 0x44..0x51 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2 and 0xFF
                                 val c = insn2 ushr 8
-                                "$name v$a, v$b, v$c"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, ${formatReg(c)}"
                             }
                             in 0x52..0x58, in 0x59..0x5f -> {
                                 val a = (insn ushr 8) and 0xF
@@ -1396,9 +1499,9 @@ object DexParser {
                                 if (c in 0 until fieldIdsSize) {
                                     val classIdx = buffer.readUShort(fieldIdsOff + c * 8)
                                     val f = resolveField(c)
-                                    "$name v$a, v$b, ${resolveType(classIdx)}->${f.name}:${toDescriptor(f.typeName)}"
+                                    "$name ${formatReg(a)}, ${formatReg(b)}, ${toDescriptor(resolveType(classIdx))}->${f.name}:${toDescriptor(f.typeName)}"
                                 } else {
-                                    "$name v$a, v$b, field@$c"
+                                    "$name ${formatReg(a)}, ${formatReg(b)}, field@$c"
                                 }
                             }
                             in 0x60..0x66, in 0x67..0x6d -> {
@@ -1407,48 +1510,53 @@ object DexParser {
                                 if (b in 0 until fieldIdsSize) {
                                     val classIdx = buffer.readUShort(fieldIdsOff + b * 8)
                                     val f = resolveField(b)
-                                    "$name v$a, ${resolveType(classIdx)}->${f.name}:${toDescriptor(f.typeName)}"
+                                    "$name ${formatReg(a)}, ${toDescriptor(resolveType(classIdx))}->${f.name}:${toDescriptor(f.typeName)}"
                                 } else {
-                                    "$name v$a, field@$b"
+                                    "$name ${formatReg(a)}, field@$b"
                                 }
                             }
                             in 0x90..0xaf -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2 and 0xFF
                                 val c = insn2 ushr 8
-                                "$name v$a, v$b, v$c"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, ${formatReg(c)}"
                             }
                             in 0xd0..0xd7 -> {
                                 val a = (insn ushr 8) and 0xF
                                 val b = (insn ushr 12) and 0xF
                                 val c = insn2.toShort().toInt()
-                                "$name v$a, v$b, $c"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, $c"
                             }
                             in 0xd8..0xe2 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2 and 0xFF
                                 var c = insn2 ushr 8
                                 if (c > 127) c -= 256
-                                "$name v$a, v$b, $c"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, $c"
                             }
-                            else -> "$name v${(insn ushr 8) and 0xFF}, $insn2"
+                            else -> "$name ${formatReg((insn ushr 8) and 0xFF)}, $insn2"
                         }
                     }
                     3 -> {
                         val insn2 = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
                         val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2)
                         when (opcode) {
-                            0x03, 0x06, 0x09 -> "$name v$insn2, v$insn3"
+                            0x03, 0x06, 0x09 -> "$name ${formatReg(insn2)}, ${formatReg(insn3)}"
                             0x14, 0x17 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                "$name v$a, 0x${Integer.toHexString(b)}"
+                                "$name ${formatReg(a)}, 0x${Integer.toHexString(b)}"
                             }
                             0x1b -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                val str = resolveString(b).replace("\n", "\\n").replace("\r", "\\r")
-                                "$name v$a, \"$str\""
+                                val str = resolveString(b)
+                                    .replace("\\", "\\\\")
+                                    .replace("\"", "\\\"")
+                                    .replace("\n", "\\n")
+                                    .replace("\r", "\\r")
+                                    .replace("\t", "\\t")
+                                "$name ${formatReg(a)}, \"$str\""
                             }
                             0x2a -> {
                                 val a = (insn2 and 0xFFFF) or (insn3 shl 16)
@@ -1463,20 +1571,20 @@ object DexParser {
                                 val reg3 = (insn3 ushr 8) and 0xF
                                 val reg4 = (insn3 ushr 12) and 0xF
                                 val list = listOf(reg1, reg2, reg3, reg4, reg5)
-                                val args = list.take(count).map { "v$it" }.joinToString(", ")
-                                "filled-new-array {$args}, ${resolveType(typeIdx)}"
+                                val args = list.take(count).map { formatReg(it) }.joinToString(", ")
+                                "filled-new-array {$args}, ${toDescriptor(resolveType(typeIdx))}"
                             }
                             0x25 -> {
                                 val count = (insn ushr 8) and 0xFF
                                 val typeIdx = insn2
                                 val startReg = insn3
-                                val args = if (count > 0) "v$startReg..v${startReg + count - 1}" else ""
-                                "filled-new-array/range {$args}, ${resolveType(typeIdx)}"
+                                val args = if (count > 0) "${formatReg(startReg)}..${formatReg(startReg + count - 1)}" else ""
+                                "filled-new-array/range {$args}, ${toDescriptor(resolveType(typeIdx))}"
                             }
                             0x2b, 0x2c, 0x26 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                "$name v$a, :label_${offset + b}"
+                                "$name ${formatReg(a)}, :label_${offset + b}"
                             }
                             in 0x6e..0x72 -> {
                                 val count = (insn ushr 12) and 0xF
@@ -1486,13 +1594,13 @@ object DexParser {
                                 val reg2 = (insn3 ushr 4) and 0xF
                                 val reg3 = (insn3 ushr 8) and 0xF
                                 val reg4 = (insn3 ushr 12) and 0xF
-                                
+
                                 val list = listOf(reg1, reg2, reg3, reg4, reg5)
-                                val args = list.take(count).map { "v$it" }.joinToString(", ")
+                                val args = list.take(count).map { formatReg(it) }.joinToString(", ")
                                 if (methIdx in 0 until methodIdsSize) {
                                     val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
                                     val m = resolveMethod(methIdx)
-                                    "$name {$args}, ${resolveType(classIdx)}->${m.name}${toSmaliSignature(m.signature)}"
+                                    "$name {$args}, ${toDescriptor(resolveType(classIdx))}->${m.name}${toSmaliSignature(m.signature)}"
                                 } else {
                                     "$name {$args}, method@$methIdx"
                                 }
@@ -1501,16 +1609,16 @@ object DexParser {
                                 val count = (insn ushr 8) and 0xFF
                                 val methIdx = insn2
                                 val startReg = insn3
-                                val args = if (count > 0) "v$startReg..v${startReg + count - 1}" else ""
+                                val args = if (count > 0) "${formatReg(startReg)}..${formatReg(startReg + count - 1)}" else ""
                                 if (methIdx in 0 until methodIdsSize) {
                                     val classIdx = buffer.readUShort(methodIdsOff + methIdx * 8)
                                     val m = resolveMethod(methIdx)
-                                    "$name {$args}, ${resolveType(classIdx)}->${m.name}${toSmaliSignature(m.signature)}"
+                                    "$name {$args}, ${toDescriptor(resolveType(classIdx))}->${m.name}${toSmaliSignature(m.signature)}"
                                 } else {
                                     "$name {$args}, method@$methIdx"
                                 }
                             }
-                            else -> "$name v${(insn ushr 8) and 0xFF}, $insn2, $insn3"
+                            else -> "$name ${formatReg((insn ushr 8) and 0xFF)}, $insn2, $insn3"
                         }
                     }
                     5 -> {
@@ -1520,7 +1628,7 @@ object DexParser {
                         val insn5 = buffer.readUShort(codeOff + 16 + (pc + 4) * 2).toLong() and 0xFFFFL
                         val a = (insn ushr 8) and 0xFF
                         val v = insn2 or (insn3 shl 16) or (insn4 shl 32) or (insn5 shl 48)
-                        "const-wide v$a, 0x${java.lang.Long.toHexString(v)}"
+                        "const-wide ${formatReg(a)}, 0x${java.lang.Long.toHexString(v)}L"
                     }
                     else -> name
                 }
@@ -2260,7 +2368,8 @@ object DexParser {
                         annotations = classAnnotations,
                         dexBytes = if (retainBytesInClass) bytes else null,
                         fieldIdsOff = fieldIdsOff,
-                        methodIdsOff = methodIdsOff
+                        methodIdsOff = methodIdsOff,
+                        sourceFile = sourceFile
                     )
                 } catch (e: Exception) {
                     // Skip malformed class safely
@@ -2276,10 +2385,17 @@ object DexParser {
 
     fun preprocessSmali(lines: List<String>, options: DexCompareOptions): List<String> {
         val result = ArrayList<String>(lines.size)
-        var insideAnnotation = false
+        var skippingAnnotation = false
 
         for (rawLine in lines) {
             val line = rawLine.trim()
+
+            if (skippingAnnotation) {
+                if (line.startsWith(".end annotation")) {
+                    skippingAnnotation = false
+                }
+                continue
+            }
 
             // Skip comment lines
             if (line.startsWith("#")) {
@@ -2312,9 +2428,25 @@ object DexParser {
                 continue
             }
 
+            // Skip ignored annotations
+            if (line.startsWith(".annotation ")) {
+                val isIgnored = line.contains("Lkotlin/Metadata;") ||
+                        line.contains("Ldalvik/annotation/SourceDebugExtension;") ||
+                        (options.ignoreCompilationOptimizations && (
+                                line.contains("Ldalvik/annotation/MemberClasses;") ||
+                                line.contains("Ldalvik/annotation/InnerClass;") ||
+                                line.contains("Ldalvik/annotation/EnclosingClass;") ||
+                                line.contains("Ldalvik/annotation/EnclosingMethod;")
+                        ))
+                if (isIgnored) {
+                    skippingAnnotation = true
+                    continue
+                }
+            }
+
             // Skip compilation optimization synthetic artifacts if enabled
             if (options.ignoreCompilationOptimizations) {
-                if (line.contains("synthetic") || line.contains("bridge")) {
+                if (line.startsWith(".method ") && line.contains("access$")) {
                     continue
                 }
             }

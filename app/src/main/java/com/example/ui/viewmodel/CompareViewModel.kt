@@ -518,6 +518,19 @@ class CompareViewModel : ViewModel() {
             } catch (e: Exception) {
                 _subfolderDefaultSortMode.value = ExplorerSortMode.SIZE_DESC
             }
+
+            val savedIgnoreDebug = sharedPrefs?.getBoolean("dex_ignore_debug_info", true) ?: true
+            val savedIgnoreCompilation = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", true) ?: true
+            val savedIgnoreRegister = sharedPrefs?.getBoolean("dex_ignore_register_count", false) ?: false
+            val savedIgnoreNop = sharedPrefs?.getBoolean("dex_ignore_nop", true) ?: true
+            val savedIgnoreFieldInitial = sharedPrefs?.getBoolean("dex_ignore_field_initial", true) ?: true
+            _dexCompareOptions.value = DexCompareOptions(
+                ignoreDebugInfo = savedIgnoreDebug,
+                ignoreCompilationOptimizations = savedIgnoreCompilation,
+                ignoreRegisterCount = savedIgnoreRegister,
+                ignoreNopInstruction = savedIgnoreNop,
+                ignoreFieldInitialValues = savedIgnoreFieldInitial
+            )
         }
         val hasAccess = checkStorageAccess(context)
         if (hasAccess) {
