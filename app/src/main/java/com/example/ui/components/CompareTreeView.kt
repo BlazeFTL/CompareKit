@@ -1,9 +1,7 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,24 +26,17 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.Code
-import androidx.compose.material.icons.outlined.CompareArrows
 import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.UnfoldLess
 import androidx.compose.material.icons.outlined.UnfoldMore
-import androidx.compose.material.icons.outlined.ViewAgenda
-import androidx.compose.material.icons.outlined.ViewList
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -105,9 +96,27 @@ sealed class TreeRowItem {
 object TreeHelper {
 
     fun buildTree(fileList: List<FileCompareStatus>): TreeFolderNode {
-        class MutableFolder(val name: String, val fullPath: String) {
+        class MutableFolder(var name: String, var fullPath: String) {
             val subFolders = mutableMapOf<String, MutableFolder>()
             val files = mutableListOf<FileCompareStatus>()
+
+            fun compressIntermediatePackages() {
+                for (sub in subFolders.values) {
+                    sub.compressIntermediatePackages()
+                }
+                val keys = subFolders.keys.toList()
+                for (k in keys) {
+                    val child = subFolders[k] ?: continue
+                    if (child.files.isEmpty() && child.subFolders.size == 1) {
+                        val grandChildKey = child.subFolders.keys.first()
+                        val grandChild = child.subFolders[grandChildKey] ?: continue
+                        val mergedName = "${child.name}.${grandChild.name}"
+                        grandChild.name = mergedName
+                        subFolders.remove(k)
+                        subFolders[mergedName] = grandChild
+                    }
+                }
+            }
 
             fun toImmutable(): TreeFolderNode {
                 val sortedSub = subFolders.values.map { it.toImmutable() }.sortedBy { it.name.lowercase() }
@@ -160,6 +169,8 @@ object TreeHelper {
             }
             current.files.add(item)
         }
+
+        root.compressIntermediatePackages()
         return root.toImmutable()
     }
 
@@ -233,7 +244,6 @@ fun CompareTreeView(
         if (changes.isNotEmpty()) {
             changes
         } else {
-            // Expand first level by default
             rootFolder.subFolders.map { it.fullPath }.toSet()
         }
     }
@@ -251,15 +261,15 @@ fun CompareTreeView(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -271,16 +281,16 @@ fun CompareTreeView(
                         imageVector = if (isDexView) Icons.Outlined.Code else Icons.Outlined.FolderOpen,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                     Text(
-                        text = if (isDexView) "DEX Package Tree" else "Folder Tree Hierarchy",
-                        style = MaterialTheme.typography.labelMedium,
+                        text = if (isDexView) "DEX Package Tree" else "Folder Tree",
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "(${flattenedRows.size} visible)",
+                        text = "(${flattenedRows.size} items)",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -288,44 +298,44 @@ fun CompareTreeView(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     FilledTonalButton(
                         onClick = {
                             expandedPaths = TreeHelper.collectAllFolderPaths(rootFolder)
                         },
-                        shape = RoundedCornerShape(6.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        modifier = Modifier.height(28.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
                     ) {
                         Icon(Icons.Outlined.UnfoldMore, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("Expand All", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Expand All", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     FilledTonalButton(
                         onClick = {
                             expandedPaths = emptySet()
                         },
-                        shape = RoundedCornerShape(6.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        modifier = Modifier.height(28.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
                     ) {
                         Icon(Icons.Outlined.UnfoldLess, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("Collapse", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Collapse", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
         }
 
-        // Tree rows LazyColumn
+        // Tree rows LazyColumn (MT Manager flat list style)
         LazyColumn(
             state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 12.dp, end = 32.dp, top = 4.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             items(
                 items = flattenedRows,
@@ -378,21 +388,21 @@ fun TreeFolderCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = indent)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(6.dp))
             .clickable { onToggleExpand() }
             .testTag("tree_folder_${folder.fullPath}"),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(6.dp),
         color = if (folder.hasChanges) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
         } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)
         },
         border = androidx.compose.foundation.BorderStroke(
-            1.dp,
+            0.8.dp,
             if (folder.hasChanges) {
-                Color(0xFFF59E0B).copy(alpha = 0.4f)
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
             } else {
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)
             }
         )
     ) {
@@ -406,7 +416,7 @@ fun TreeFolderCard(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = if (isExpanded) "Collapse" else "Expand",
                 modifier = Modifier
-                    .size(18.dp)
+                    .size(16.dp)
                     .rotate(rotation),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -416,7 +426,7 @@ fun TreeFolderCard(
             Icon(
                 imageVector = if (isExpanded) Icons.Filled.FolderOpen else Icons.Filled.Folder,
                 contentDescription = null,
-                tint = if (folder.hasChanges) Color(0xFFF59E0B) else MaterialTheme.colorScheme.primary,
+                tint = if (folder.hasChanges) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.size(18.dp)
             )
 
@@ -434,17 +444,18 @@ fun TreeFolderCard(
             )
 
             if (folder.hasChanges) {
+                val totalChanges = folder.modifiedCount + folder.addedCount + folder.deletedCount
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFFF59E0B).copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.35f)),
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
                     modifier = Modifier.padding(start = 6.dp)
                 ) {
                     Text(
-                        text = "${folder.modifiedCount + folder.addedCount + folder.deletedCount} changed",
+                        text = "$totalChanges changed",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFD97706),
+                        color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
@@ -453,7 +464,7 @@ fun TreeFolderCard(
             Text(
                 text = "(${folder.totalFiles})",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 modifier = Modifier.padding(start = 6.dp)
             )
         }
@@ -469,43 +480,39 @@ fun TreeFileCard(
 ) {
     val fileName = fileStatus.relativePath.substringAfterLast('/')
     val isSmali = fileName.endsWith(".smali", ignoreCase = true) || isDexView
-    val indent = (depth * 14 + 10).dp
+    val indent = (depth * 14 + 8).dp
 
     val statusColor = when (fileStatus.status) {
-        FileStatus.MODIFIED -> Color(0xFFF59E0B)
-        FileStatus.ADDED -> Color(0xFF10B981)
-        FileStatus.DELETED -> Color(0xFFEF4444)
-        FileStatus.MOVED -> Color(0xFF8B5CF6)
+        FileStatus.MODIFIED -> MaterialTheme.colorScheme.primary
+        FileStatus.ADDED -> Color(0xFF16A34A)
+        FileStatus.DELETED -> Color(0xFFDC2626)
+        FileStatus.MOVED -> MaterialTheme.colorScheme.secondary
         FileStatus.UNCHANGED -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
     }
 
     val statusBg = when (fileStatus.status) {
-        FileStatus.MODIFIED -> Color(0xFFF59E0B).copy(alpha = 0.14f)
-        FileStatus.ADDED -> Color(0xFF10B981).copy(alpha = 0.14f)
-        FileStatus.DELETED -> Color(0xFFEF4444).copy(alpha = 0.14f)
-        FileStatus.MOVED -> Color(0xFF8B5CF6).copy(alpha = 0.14f)
-        FileStatus.UNCHANGED -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        FileStatus.MODIFIED -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
+        FileStatus.ADDED -> Color(0xFF16A34A).copy(alpha = 0.12f)
+        FileStatus.DELETED -> Color(0xFFDC2626).copy(alpha = 0.12f)
+        FileStatus.MOVED -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
+        FileStatus.UNCHANGED -> MaterialTheme.colorScheme.surface
     }
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = indent)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(6.dp))
             .clickable { onCompare() }
             .testTag("tree_file_${fileStatus.relativePath}"),
-        shape = RoundedCornerShape(8.dp),
-        color = if (fileStatus.status != FileStatus.UNCHANGED) {
-            statusBg
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-        },
+        shape = RoundedCornerShape(6.dp),
+        color = statusBg,
         border = androidx.compose.foundation.BorderStroke(
-            1.dp,
+            0.7.dp,
             if (fileStatus.status != FileStatus.UNCHANGED) {
-                statusColor.copy(alpha = 0.45f)
+                statusColor.copy(alpha = 0.35f)
             } else {
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)
             }
         )
     ) {
@@ -515,16 +522,16 @@ fun TreeFileCard(
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Icon
+            // MT Manager style icon
             if (isSmali) {
-                // Stylish Class "[C]" icon badge matching MT Manager style
+                // Circular Class badge with white letter "C"
                 Surface(
-                    shape = RoundedCornerShape(4.dp),
+                    shape = CircleShape,
                     color = when (fileStatus.status) {
-                        FileStatus.MODIFIED -> Color(0xFFF59E0B)
-                        FileStatus.ADDED -> Color(0xFF10B981)
-                        FileStatus.DELETED -> Color(0xFFEF4444)
-                        FileStatus.MOVED -> Color(0xFF8B5CF6)
+                        FileStatus.MODIFIED -> Color(0xFF2563EB)
+                        FileStatus.ADDED -> Color(0xFF16A34A)
+                        FileStatus.DELETED -> Color(0xFFDC2626)
+                        FileStatus.MOVED -> MaterialTheme.colorScheme.secondary
                         FileStatus.UNCHANGED -> MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
                     },
                     modifier = Modifier.size(20.dp)
@@ -555,9 +562,9 @@ fun TreeFileCard(
                 Text(
                     text = if (isSmali && fileName.endsWith(".smali")) fileName.removeSuffix(".smali") else fileName,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (fileStatus.status != FileStatus.UNCHANGED) FontWeight.Bold else FontWeight.Normal,
+                    fontWeight = if (fileStatus.status != FileStatus.UNCHANGED) FontWeight.SemiBold else FontWeight.Normal,
                     fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = if (fileStatus.status != FileStatus.UNCHANGED) statusColor else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -565,7 +572,7 @@ fun TreeFileCard(
                     Text(
                         text = "from: ${fileStatus.originalPath}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF8B5CF6),
+                        color = MaterialTheme.colorScheme.secondary,
                         fontWeight = FontWeight.SemiBold,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 10.sp,
@@ -575,59 +582,23 @@ fun TreeFileCard(
                 }
             }
 
-            // Status Badge
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = statusBg,
-                border = androidx.compose.foundation.BorderStroke(1.dp, statusColor.copy(alpha = 0.4f)),
-                modifier = Modifier.padding(horizontal = 4.dp)
-            ) {
-                Text(
-                    text = fileStatus.status.name,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = statusColor,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.sp,
-                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                )
-            }
-
-            // Quick action button
-            FilledTonalButton(
-                onClick = onCompare,
-                shape = RoundedCornerShape(6.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = if (fileStatus.status == FileStatus.MODIFIED) {
-                        Color(0xFFF59E0B).copy(alpha = 0.2f)
-                    } else {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                    },
-                    contentColor = if (fileStatus.status == FileStatus.MODIFIED) {
-                        Color(0xFFD97706)
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    }
-                ),
-                modifier = Modifier
-                    .height(26.dp)
-                    .padding(start = 2.dp)
-            ) {
-                Icon(
-                    imageVector = if (fileStatus.status == FileStatus.MODIFIED) {
-                        Icons.Outlined.CompareArrows
-                    } else {
-                        Icons.Outlined.Visibility
-                    },
-                    contentDescription = null,
-                    modifier = Modifier.size(13.dp)
-                )
-                Spacer(modifier = Modifier.width(3.dp))
-                Text(
-                    text = if (fileStatus.status == FileStatus.MODIFIED) "Diff" else "View",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            // Compact Status Badge
+            if (fileStatus.status != FileStatus.UNCHANGED) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = statusColor.copy(alpha = 0.12f),
+                    border = androidx.compose.foundation.BorderStroke(0.8.dp, statusColor.copy(alpha = 0.35f)),
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                ) {
+                    Text(
+                        text = fileStatus.status.name,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = statusColor,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
     }

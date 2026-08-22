@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    com.example.file.DexStorageManager.init(applicationContext.cacheDir)
     compareViewModel.loadTheme(applicationContext)
     enableEdgeToEdge()
     setContent {

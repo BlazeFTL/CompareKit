@@ -19,12 +19,27 @@ object DexStorageManager {
             dir.mkdirs()
         }
         cacheDir = dir
+        clearCache()
+    }
+
+    private fun getOrCreateCacheDir(): File {
+        val dir = cacheDir ?: File(System.getProperty("java.io.tmpdir") ?: "/tmp", "comparekit_dex_cache")
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return dir
     }
 
     fun clearCache() {
         try {
-            cacheDir?.deleteRecursively()
-            cacheDir?.mkdirs()
+            val dir = getOrCreateCacheDir()
+            dir.listFiles()?.forEach { file ->
+                try {
+                    file.deleteRecursively()
+                } catch (e: Exception) {
+                    // ignore
+                }
+            }
         } catch (e: Exception) {
             // ignore
         }
@@ -38,7 +53,19 @@ object DexStorageManager {
     fun streamZipDexToTempFiles(zipFile: File, prefix: String = "dex_", specificEntryName: String? = null): List<File> {
         if (!zipFile.exists() || !zipFile.isFile) return emptyList()
         val tempFiles = mutableListOf<File>()
-        val targetDir = cacheDir ?: File(zipFile.parentFile, "dex_cache").apply { mkdirs() }
+        val targetDir = getOrCreateCacheDir()
+
+        try {
+            // Also clean up any legacy dex_cache that might have been accidentally created in zipFile's directory
+            zipFile.parentFile?.let { parent ->
+                val legacyCache = File(parent, "dex_cache")
+                if (legacyCache.exists() && legacyCache.isDirectory) {
+                    legacyCache.deleteRecursively()
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
 
         try {
             ZipFile(zipFile).use { zip ->
@@ -82,6 +109,9 @@ object DexStorageManager {
             dir.walkTopDown()
                 .filter { file ->
                     if (!file.isFile) return@filter false
+                    // Exclude internal dex_cache directories
+                    val path = file.absolutePath.replace('\\', '/')
+                    if (path.contains("/dex_cache/") || path.contains("/comparekit_dex_cache/")) return@filter false
                     val relPath = file.relativeTo(dir).path.replace('\\', '/')
                     if (cleanSpecific != null && cleanSpecific.isNotEmpty()) {
                         relPath.equals(cleanSpecific, ignoreCase = true) || file.name.equals(cleanSpecific, ignoreCase = true)
@@ -96,3 +126,4 @@ object DexStorageManager {
         }
     }
 }
+

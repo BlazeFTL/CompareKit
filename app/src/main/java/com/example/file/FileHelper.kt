@@ -73,9 +73,16 @@ object FileHelper {
         )
 
         fun traverse(dir: File) {
+            val dirName = dir.name.lowercase()
+            if (dirName == "dex_cache" || dirName == "comparekit_dex_cache") {
+                return
+            }
             dir.listFiles()?.forEach { file ->
                 if (file.isDirectory) {
-                    traverse(file)
+                    val subName = file.name.lowercase()
+                    if (subName != "dex_cache" && subName != "comparekit_dex_cache") {
+                        traverse(file)
+                    }
                 } else {
                     val rel = file.relativeTo(baseDir).path
                     if (isApkSigningFile(rel)) {

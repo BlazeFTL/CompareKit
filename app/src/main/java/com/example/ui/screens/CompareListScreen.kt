@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import com.example.file.DexCompareOptions
 import com.example.file.FileCompareStatus
 import com.example.file.FileStatus
+import com.example.ui.components.FileThumbnailIcon
 import com.example.ui.components.CompareKitLogo
 import com.example.ui.components.CompareTreeView
 import com.example.ui.components.DecompiledApkOptionsDialog
@@ -746,18 +747,6 @@ fun CompareListScreen(
                                     val isZip = file.name.lowercase().endsWith(".zip") || file.name.lowercase().endsWith(".apk")
                                     val isDir = file.isDirectory
 
-                                    val icon = when {
-                                        isDir -> Icons.Default.Folder
-                                        isZip -> Icons.Default.FolderZip
-                                        else -> getFileTypeIcon(file.name)
-                                    }
-
-                                    val tint = when {
-                                        isDir -> MaterialTheme.colorScheme.primary
-                                        isZip -> MaterialTheme.colorScheme.tertiary
-                                        else -> MaterialTheme.colorScheme.secondary
-                                    }
-
                                     Surface(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(10.dp),
@@ -777,20 +766,10 @@ fun CompareListScreen(
                                                 .padding(horizontal = 10.dp, vertical = 7.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Surface(
-                                                shape = RoundedCornerShape(7.dp),
-                                                color = tint.copy(alpha = 0.12f),
-                                                modifier = Modifier.size(30.dp)
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        imageVector = icon,
-                                                        contentDescription = null,
-                                                        tint = tint,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            }
+                                            FileThumbnailIcon(
+                                                file = file,
+                                                modifier = Modifier.size(34.dp)
+                                            )
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
@@ -2379,24 +2358,24 @@ fun DiffDistributionBar(
 @Composable
 fun ModernStatusBadge(status: FileStatus) {
     val (text, bgColor, textColor) = when (status) {
-        FileStatus.UNCHANGED -> Triple("UNCHANGED", Color(0xFF64748B).copy(alpha = 0.12f), Color(0xFF64748B))
-        FileStatus.MODIFIED -> Triple("MODIFIED", Color(0xFFF59E0B).copy(alpha = 0.15f), Color(0xFFD97706))
-        FileStatus.ADDED -> Triple("ADDED", Color(0xFF10B981).copy(alpha = 0.15f), Color(0xFF059669))
-        FileStatus.DELETED -> Triple("DELETED", Color(0xFFEF4444).copy(alpha = 0.15f), Color(0xFFDC2626))
-        FileStatus.MOVED -> Triple("MOVED", Color(0xFF8B5CF6).copy(alpha = 0.15f), Color(0xFF7C3AED))
+        FileStatus.UNCHANGED -> Triple("UNCHANGED", MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), MaterialTheme.colorScheme.onSurfaceVariant)
+        FileStatus.MODIFIED -> Triple("MODIFIED", MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), MaterialTheme.colorScheme.primary)
+        FileStatus.ADDED -> Triple("ADDED", Color(0xFF16A34A).copy(alpha = 0.14f), Color(0xFF16A34A))
+        FileStatus.DELETED -> Triple("DELETED", Color(0xFFDC2626).copy(alpha = 0.14f), Color(0xFFDC2626))
+        FileStatus.MOVED -> Triple("MOVED", MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f), MaterialTheme.colorScheme.secondary)
     }
 
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(6.dp),
         color = bgColor
     ) {
         Text(
             text = text,
             color = textColor,
             fontSize = 10.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 0.4.sp,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.3.sp,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp)
         )
     }
 }
@@ -2471,9 +2450,9 @@ private fun computeFileDiffStats(item: FileCompareStatus): DiffStats {
 
 private fun getStatusColor(status: FileStatus): Color {
     return when (status) {
-        FileStatus.ADDED -> Color(0xFF10B981)
-        FileStatus.DELETED -> Color(0xFFEF4444)
-        FileStatus.MODIFIED -> Color(0xFFF59E0B)
+        FileStatus.ADDED -> Color(0xFF16A34A)
+        FileStatus.DELETED -> Color(0xFFDC2626)
+        FileStatus.MODIFIED -> Color(0xFF2563EB)
         FileStatus.MOVED -> Color(0xFF8B5CF6)
         FileStatus.UNCHANGED -> Color(0xFF64748B)
     }

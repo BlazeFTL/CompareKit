@@ -818,8 +818,8 @@ fun DexCompareView(
                                 onClick = { viewModel.setHideAddedDexClasses(!hideAdded) },
                                 label = { Text("Hide Added", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(0xFFE8F5E9),
-                                    selectedLabelColor = Color(0xFF2E7D32)
+                                    selectedContainerColor = Color(0xFF16A34A).copy(alpha = 0.15f),
+                                    selectedLabelColor = Color(0xFF16A34A)
                                 )
                             )
 
@@ -828,8 +828,8 @@ fun DexCompareView(
                                 onClick = { viewModel.setHideRemovedDexClasses(!hideRemoved) },
                                 label = { Text("Hide Removed", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(0xFFFFEBEE),
-                                    selectedLabelColor = Color(0xFFC62828)
+                                    selectedContainerColor = Color(0xFFDC2626).copy(alpha = 0.15f),
+                                    selectedLabelColor = Color(0xFFDC2626)
                                 )
                             )
 
@@ -838,8 +838,8 @@ fun DexCompareView(
                                 onClick = { viewModel.setHideModifiedDexClasses(!hideModified) },
                                 label = { Text("Hide Changed", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(0xFFFFF3E0),
-                                    selectedLabelColor = Color(0xFFEF6C00)
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                    selectedLabelColor = MaterialTheme.colorScheme.primary
                                 )
                             )
                         }
@@ -870,7 +870,7 @@ fun DexCompareView(
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         items(visibleNodes, key = { it.path }) { node ->
                             DexTreeNodeRow(
@@ -904,51 +904,83 @@ fun DexTreeNodeRow(
 ) {
     val rotation by animateFloatAsState(targetValue = if (isExpanded) 90f else 0f)
 
-    val (statusColor, badgeText, statusBg) = when (node.status) {
-        DexStatus.UNCHANGED -> Triple(MaterialTheme.colorScheme.onSurfaceVariant, "Identical", Color.Transparent)
-        DexStatus.ADDED -> Triple(Color(0xFF2E7D32), "Added", Color(0xFFE8F5E9))
-        DexStatus.DELETED -> Triple(Color(0xFFC62828), "Removed", Color(0xFFFFEBEE))
-        DexStatus.MODIFIED -> Triple(Color(0xFFE65100), "Modified", Color(0xFFFFF3E0))
+    val statusColor = when (node.status) {
+        DexStatus.UNCHANGED -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        DexStatus.ADDED -> Color(0xFF16A34A)
+        DexStatus.DELETED -> Color(0xFFDC2626)
+        DexStatus.MODIFIED -> Color(0xFF2563EB)
+    }
+
+    val badgeText = when (node.status) {
+        DexStatus.UNCHANGED -> "Identical"
+        DexStatus.ADDED -> "Added"
+        DexStatus.DELETED -> "Removed"
+        DexStatus.MODIFIED -> "Modified"
+    }
+
+    val statusBg = when (node.status) {
+        DexStatus.UNCHANGED -> MaterialTheme.colorScheme.surface
+        DexStatus.ADDED -> Color(0xFF16A34A).copy(alpha = 0.10f)
+        DexStatus.DELETED -> Color(0xFFDC2626).copy(alpha = 0.10f)
+        DexStatus.MODIFIED -> Color(0xFF2563EB).copy(alpha = 0.10f)
     }
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = (node.depth * 14).dp),
+            .padding(start = (node.depth * 14).dp)
+            .clip(RoundedCornerShape(6.dp)),
         shape = RoundedCornerShape(6.dp),
-        color = if (node.isLeaf) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        border = BorderStroke(0.5.dp, if (node.status != DexStatus.UNCHANGED) statusColor.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)),
+        color = if (node.isLeaf) statusBg else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.20f),
+        border = BorderStroke(
+            0.6.dp,
+            if (node.status != DexStatus.UNCHANGED) statusColor.copy(alpha = 0.35f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)
+        ),
         onClick = {
             if (node.isLeaf) onClickLeaf() else onToggleExpand()
         }
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 7.dp, horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Chevron for expandables
             if (!node.isLeaf) {
                 Icon(
                     imageVector = Icons.Default.ChevronRight,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp).rotate(rotation).clickable { onToggleExpand() }
+                    modifier = Modifier
+                        .size(16.dp)
+                        .rotate(rotation)
+                        .clickable { onToggleExpand() }
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(
                     imageVector = if (isExpanded) Icons.Default.FolderOpen else Icons.Default.Folder,
                     contentDescription = null,
-                    tint = if (node.status != DexStatus.UNCHANGED) statusColor else MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.size(20.dp)
-                )
-            } else {
-                Spacer(modifier = Modifier.width(22.dp))
-                Icon(
-                    imageVector = Icons.Default.Code,
-                    contentDescription = null,
-                    tint = if (node.status != DexStatus.UNCHANGED) statusColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    tint = if (node.status != DexStatus.UNCHANGED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.size(18.dp)
                 )
+            } else {
+                // MT Manager circular Class [C] icon badge
+                Surface(
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    color = statusColor,
+                    modifier = Modifier.size(20.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "C",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -957,8 +989,9 @@ fun DexTreeNodeRow(
             Text(
                 text = node.name,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (node.status != DexStatus.UNCHANGED) FontWeight.Bold else FontWeight.Normal,
-                color = if (node.status != DexStatus.UNCHANGED) statusColor else MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (node.status != DexStatus.UNCHANGED) FontWeight.SemiBold else FontWeight.Normal,
+                fontFamily = FontFamily.Monospace,
+                color = if (node.status != DexStatus.UNCHANGED && node.isLeaf) statusColor else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
@@ -966,17 +999,19 @@ fun DexTreeNodeRow(
 
             // Status Badge
             if (node.status != DexStatus.UNCHANGED) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(statusBg)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = statusColor.copy(alpha = 0.12f),
+                    border = BorderStroke(0.8.dp, statusColor.copy(alpha = 0.35f)),
+                    modifier = Modifier.padding(horizontal = 4.dp)
                 ) {
                     Text(
                         text = badgeText,
                         style = MaterialTheme.typography.labelSmall,
                         color = statusColor,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                 }
             }

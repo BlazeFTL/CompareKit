@@ -578,6 +578,10 @@ class CompareViewModel : ViewModel() {
                 val query = _explorerSearchQuery.value.trim().lowercase()
 
                 val filtered = files.filter { file ->
+                    val nameLower = file.name.lowercase()
+                    if (nameLower == "dex_cache" || nameLower == "comparekit_dex_cache") {
+                        return@filter false
+                    }
                     val passesType = if (file.isDirectory) true
                     else {
                         val ext = file.extension.lowercase()
@@ -653,6 +657,7 @@ class CompareViewModel : ViewModel() {
             _modifiedName.value = item.name
             _modifiedIsZip.value = item.name.lowercase().let { it.endsWith(".zip") || it.endsWith(".apk") }
         }
+        DexStorageManager.clearCache()
         _searchQuery.value = ""
         _activeFileSearchQuery.value = ""
         _statusFilter.value = null
