@@ -396,6 +396,9 @@ class CompareViewModel : ViewModel() {
         _activeDexVirtualPath.value = null
         _selectedFile.value = null
         _diffLines.value = emptyList()
+        _searchQuery.value = ""
+        _activeFileSearchQuery.value = ""
+        _statusFilter.value = null
         synchronized(virtualDexSourceClasses) { virtualDexSourceClasses.clear() }
         synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses.clear() }
         DexStorageManager.clearCache()
@@ -650,6 +653,12 @@ class CompareViewModel : ViewModel() {
             _modifiedName.value = item.name
             _modifiedIsZip.value = item.name.lowercase().let { it.endsWith(".zip") || it.endsWith(".apk") }
         }
+        _searchQuery.value = ""
+        _activeFileSearchQuery.value = ""
+        _statusFilter.value = null
+        _selectedFile.value = null
+        _activeDexVirtualPath.value = null
+        _selectedDexClassDetail.value = null
         _activePickerTarget.value = PickerTarget.NONE
     }
 
@@ -667,6 +676,13 @@ class CompareViewModel : ViewModel() {
         _sourceDir.value = null
         _modifiedDir.value = null
         _fileList.value = emptyList()
+        _searchQuery.value = ""
+        _activeFileSearchQuery.value = ""
+        _statusFilter.value = null
+        _ignoreQuery.value = ""
+        _selectedFile.value = null
+        _activeDexVirtualPath.value = null
+        _selectedDexClassDetail.value = null
         DexStorageManager.clearCache()
     }
 
@@ -800,6 +816,10 @@ class CompareViewModel : ViewModel() {
     fun performComparison(context: Context) {
         val srcFile = _sourceFile.value ?: return
         val modFile = _modifiedFile.value ?: return
+
+        _searchQuery.value = ""
+        _activeFileSearchQuery.value = ""
+        _statusFilter.value = null
 
         comparisonJob?.cancel()
         comparisonJob = viewModelScope.launch {
@@ -1065,10 +1085,10 @@ class CompareViewModel : ViewModel() {
         _lineHeightMultiplier.value = sharedPrefs?.getFloat("line_height_multiplier", 1.40f) ?: 1.40f
 
         val ignoreDebugInfo = sharedPrefs?.getBoolean("dex_ignore_debug_info", true) ?: true
-        val ignoreCompilationOptimizations = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", false) ?: false
-        val ignoreRegisterCount = sharedPrefs?.getBoolean("dex_ignore_register_count", false) ?: false
+        val ignoreCompilationOptimizations = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", true) ?: true
+        val ignoreRegisterCount = sharedPrefs?.getBoolean("dex_ignore_register_count", true) ?: true
         val ignoreNopInstruction = sharedPrefs?.getBoolean("dex_ignore_nop", true) ?: true
-        val ignoreFieldInitialValues = sharedPrefs?.getBoolean("dex_ignore_field_initial", false) ?: false
+        val ignoreFieldInitialValues = sharedPrefs?.getBoolean("dex_ignore_field_initial", true) ?: true
 
         _dexCompareOptions.value = DexCompareOptions(
             ignoreDebugInfo = ignoreDebugInfo,

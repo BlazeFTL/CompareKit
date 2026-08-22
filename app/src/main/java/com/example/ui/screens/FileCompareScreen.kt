@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,7 +72,12 @@ fun FileCompareScreen(
 
     var showGoToLineDialog by remember { mutableStateOf(false) }
     var goToLineText by remember { mutableStateOf("") }
-    var isSearchExpanded by remember { mutableStateOf(false) }
+    var isSearchExpanded by rememberSaveable(fileSearchQuery) { mutableStateOf(fileSearchQuery.isNotEmpty()) }
+    LaunchedEffect(fileSearchQuery) {
+        if (fileSearchQuery.isNotEmpty()) {
+            isSearchExpanded = true
+        }
+    }
     var showMenu by remember { mutableStateOf(false) }
     var fontSize by remember { mutableStateOf(13f) }
     var showSettingsDialog by remember { mutableStateOf(false) }

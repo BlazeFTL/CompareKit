@@ -99,7 +99,12 @@ fun CompareListScreen(
     val explorerSortMode by viewModel.explorerSortMode.collectAsState()
 
     var showSettingsDialog by remember { mutableStateOf(false) }
-    var isSearchActive by remember { mutableStateOf(false) }
+    var isSearchActive by rememberSaveable(searchQuery) { mutableStateOf(searchQuery.isNotEmpty()) }
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isNotEmpty()) {
+            isSearchActive = true
+        }
+    }
     var showIgnoreField by remember { mutableStateOf(false) }
 
     var showExplorerSortMenu by remember { mutableStateOf(false) }

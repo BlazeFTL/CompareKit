@@ -58,7 +58,7 @@ data class DexClassCompareStatus(
 data class DexCompareOptions(
     val ignoreDebugInfo: Boolean = true,
     val ignoreCompilationOptimizations: Boolean = true,
-    val ignoreRegisterCount: Boolean = false,
+    val ignoreRegisterCount: Boolean = true,
     val ignoreNopInstruction: Boolean = true,
     val ignoreFieldInitialValues: Boolean = true
 )
@@ -160,11 +160,16 @@ fun isDefaultValue(type: String, value: String?): Boolean {
 
 fun isIgnoredAnnotation(annotationType: String, options: DexCompareOptions): Boolean {
     val desc = toDescriptor(annotationType)
-    if (desc == "Lkotlin/Metadata;" || desc == "Ldalvik/annotation/SourceDebugExtension;") {
-        return true
+    if (options.ignoreDebugInfo) {
+        if (desc == "Ldalvik/annotation/SourceDebugExtension;" ||
+            desc == "Ldalvik/annotation/SourceFile;"
+        ) {
+            return true
+        }
     }
     if (options.ignoreCompilationOptimizations) {
-        if (desc == "Ldalvik/annotation/MemberClasses;" ||
+        if (desc == "Lkotlin/Metadata;" ||
+            desc == "Ldalvik/annotation/MemberClasses;" ||
             desc == "Ldalvik/annotation/InnerClass;" ||
             desc == "Ldalvik/annotation/EnclosingClass;" ||
             desc == "Ldalvik/annotation/EnclosingMethod;"
@@ -217,9 +222,9 @@ fun DexClass.toTextRepresentation(options: DexCompareOptions = DexCompareOptions
     var methodsList = fullMethods
 
     if (options.ignoreCompilationOptimizations) {
-        staticFields = staticFields.filter { (it.accessFlags and 0x1000) == 0 }.sortedBy { it.name }
-        instanceFields = instanceFields.filter { (it.accessFlags and 0x1000) == 0 }.sortedBy { it.name }
-        methodsList = methodsList.filter { !isCompilerSyntheticHelper(it) }.sortedBy { it.name + it.signature }
+        staticFields = staticFields.sortedBy { it.name }
+        instanceFields = instanceFields.sortedBy { it.name }
+        methodsList = methodsList.sortedBy { it.name + it.signature }
     }
 
     if (staticFields.isNotEmpty()) {
@@ -2297,11 +2302,7 @@ object DexParser {
                         }
                     }
 
-                    val sortedFields = if (options.ignoreCompilationOptimizations) {
-                        fields.filter { (it.accessFlags and 0x1000) == 0 }.sortedBy { it.name }
-                    } else {
-                        fields.sortedBy { it.name }
-                    }
+                    val sortedFields = fields.sortedBy { it.name }
                     for (f in sortedFields) {
                         for (i in 0 until f.name.length) {
                             classHash = (classHash xor f.name[i].code.toLong()) * fnvPrime
@@ -2327,11 +2328,7 @@ object DexParser {
                         }
                     }
 
-                    val sortedMethods = if (options.ignoreCompilationOptimizations) {
-                        methods.filter { (it.accessFlags and 0x1000) == 0 && (it.accessFlags and 0x0040) == 0 }.sortedBy { it.name + it.signature }
-                    } else {
-                        methods.sortedBy { it.name + it.signature }
-                    }
+                    val sortedMethods = methods.sortedBy { it.name + it.signature }
                     for (m in sortedMethods) {
                         for (i in 0 until m.name.length) {
                             classHash = (classHash xor m.name[i].code.toLong()) * fnvPrime
@@ -2440,13 +2437,6 @@ object DexParser {
                         ))
                 if (isIgnored) {
                     skippingAnnotation = true
-                    continue
-                }
-            }
-
-            // Skip compilation optimization synthetic artifacts if enabled
-            if (options.ignoreCompilationOptimizations) {
-                if (line.startsWith(".method ") && line.contains("access$")) {
                     continue
                 }
             }
