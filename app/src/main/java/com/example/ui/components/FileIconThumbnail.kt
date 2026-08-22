@@ -8,7 +8,6 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.util.LruCache
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -25,10 +24,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +33,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 object ApkIconCache {
-    private val memoryCache = LruCache<String, ImageBitmap>(80)
+    private val memoryCache = LruCache<String, ImageBitmap>(120)
 
     fun get(key: String): ImageBitmap? = memoryCache.get(key)
     fun put(key: String, bitmap: ImageBitmap) {
@@ -86,6 +83,7 @@ fun FileThumbnailIcon(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val filePath = file.absolutePath
     val isDir = file.isDirectory
     val nameLower = file.name.lowercase()
     val isApk = !isDir && (nameLower.endsWith(".apk") || nameLower.endsWith(".apks") || nameLower.endsWith(".xapk"))
@@ -93,23 +91,30 @@ fun FileThumbnailIcon(
     val isDex = !isDir && nameLower.endsWith(".dex")
 
     if (isApk) {
-        val cached = remember(file.absolutePath) { ApkIconCache.get(file.absolutePath) }
-        val apkIcon by produceState<ImageBitmap?>(initialValue = cached, key1 = file.absolutePath) {
-            if (value == null) {
-                value = ApkIconCache.loadIcon(context, file)
+        var currentBitmap by remember(filePath) {
+            mutableStateOf(ApkIconCache.get(filePath))
+        }
+
+        LaunchedEffect(filePath) {
+            val cached = ApkIconCache.get(filePath)
+            if (cached != null) {
+                currentBitmap = cached
+            } else {
+                currentBitmap = ApkIconCache.loadIcon(context, file)
             }
         }
 
-        if (apkIcon != null) {
+        val bitmap = currentBitmap
+        if (bitmap != null) {
             Image(
-                bitmap = apkIcon!!,
+                bitmap = bitmap,
                 contentDescription = file.name,
                 modifier = modifier
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(8.dp))
             )
         } else {
             Surface(
-                shape = RoundedCornerShape(6.dp),
+                shape = RoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
                 modifier = modifier
             ) {
@@ -118,7 +123,7 @@ fun FileThumbnailIcon(
                         imageVector = Icons.Filled.Android,
                         contentDescription = file.name,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -163,7 +168,7 @@ fun FileThumbnailIcon(
         }
 
         Surface(
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(8.dp),
             color = bgTint,
             modifier = modifier
         ) {
@@ -172,7 +177,7 @@ fun FileThumbnailIcon(
                     imageVector = icon,
                     contentDescription = null,
                     tint = iconTint,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }

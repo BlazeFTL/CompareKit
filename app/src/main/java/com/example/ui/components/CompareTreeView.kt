@@ -32,8 +32,6 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.UnfoldLess
 import androidx.compose.material.icons.outlined.UnfoldMore
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,7 +49,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -329,13 +326,13 @@ fun CompareTreeView(
             }
         }
 
-        // Tree rows LazyColumn (MT Manager flat list style)
+        // Tree rows LazyColumn (Clean MT Manager hierarchy style)
         LazyColumn(
             state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             items(
                 items = flattenedRows,
@@ -382,7 +379,7 @@ fun TreeFolderCard(
         label = "folderChevronRotation"
     )
 
-    val indent = (depth * 14).dp
+    val indent = (depth * 16).dp
 
     Surface(
         modifier = Modifier
@@ -392,24 +389,16 @@ fun TreeFolderCard(
             .clickable { onToggleExpand() }
             .testTag("tree_folder_${folder.fullPath}"),
         shape = RoundedCornerShape(6.dp),
-        color = if (folder.hasChanges) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
+        color = if (isExpanded) {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
         } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)
-        },
-        border = androidx.compose.foundation.BorderStroke(
-            0.8.dp,
-            if (folder.hasChanges) {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-            } else {
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)
-            }
-        )
+            Color.Transparent
+        }
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 7.dp),
+                .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -418,7 +407,7 @@ fun TreeFolderCard(
                 modifier = Modifier
                     .size(16.dp)
                     .rotate(rotation),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
             )
 
             Spacer(modifier = Modifier.width(4.dp))
@@ -426,7 +415,7 @@ fun TreeFolderCard(
             Icon(
                 imageVector = if (isExpanded) Icons.Filled.FolderOpen else Icons.Filled.Folder,
                 contentDescription = null,
-                tint = if (folder.hasChanges) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                tint = if (folder.hasChanges) MaterialTheme.colorScheme.primary else Color(0xFFEAB308),
                 modifier = Modifier.size(18.dp)
             )
 
@@ -435,8 +424,8 @@ fun TreeFolderCard(
             Text(
                 text = folder.name.ifEmpty { "root" },
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.5.sp,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -464,8 +453,9 @@ fun TreeFolderCard(
             Text(
                 text = "(${folder.totalFiles})",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                modifier = Modifier.padding(start = 6.dp)
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 6.dp, end = 4.dp)
             )
         }
     }
@@ -480,22 +470,22 @@ fun TreeFileCard(
 ) {
     val fileName = fileStatus.relativePath.substringAfterLast('/')
     val isSmali = fileName.endsWith(".smali", ignoreCase = true) || isDexView
-    val indent = (depth * 14 + 8).dp
+    val indent = (depth * 16 + 8).dp
 
     val statusColor = when (fileStatus.status) {
-        FileStatus.MODIFIED -> MaterialTheme.colorScheme.primary
+        FileStatus.MODIFIED -> Color(0xFF2563EB)
         FileStatus.ADDED -> Color(0xFF16A34A)
         FileStatus.DELETED -> Color(0xFFDC2626)
         FileStatus.MOVED -> MaterialTheme.colorScheme.secondary
-        FileStatus.UNCHANGED -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        FileStatus.UNCHANGED -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
     }
 
     val statusBg = when (fileStatus.status) {
-        FileStatus.MODIFIED -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
-        FileStatus.ADDED -> Color(0xFF16A34A).copy(alpha = 0.12f)
-        FileStatus.DELETED -> Color(0xFFDC2626).copy(alpha = 0.12f)
-        FileStatus.MOVED -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
-        FileStatus.UNCHANGED -> MaterialTheme.colorScheme.surface
+        FileStatus.MODIFIED -> Color(0xFF2563EB).copy(alpha = 0.10f)
+        FileStatus.ADDED -> Color(0xFF16A34A).copy(alpha = 0.10f)
+        FileStatus.DELETED -> Color(0xFFDC2626).copy(alpha = 0.10f)
+        FileStatus.MOVED -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.10f)
+        FileStatus.UNCHANGED -> Color.Transparent
     }
 
     Surface(
@@ -506,20 +496,12 @@ fun TreeFileCard(
             .clickable { onCompare() }
             .testTag("tree_file_${fileStatus.relativePath}"),
         shape = RoundedCornerShape(6.dp),
-        color = statusBg,
-        border = androidx.compose.foundation.BorderStroke(
-            0.7.dp,
-            if (fileStatus.status != FileStatus.UNCHANGED) {
-                statusColor.copy(alpha = 0.35f)
-            } else {
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)
-            }
-        )
+        color = statusBg
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // MT Manager style icon
@@ -532,17 +514,16 @@ fun TreeFileCard(
                         FileStatus.ADDED -> Color(0xFF16A34A)
                         FileStatus.DELETED -> Color(0xFFDC2626)
                         FileStatus.MOVED -> MaterialTheme.colorScheme.secondary
-                        FileStatus.UNCHANGED -> MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                        FileStatus.UNCHANGED -> MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
                     },
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(19.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = "C",
                             color = Color.White,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
+                            fontWeight = FontWeight.Black
                         )
                     }
                 }
@@ -550,21 +531,21 @@ fun TreeFileCard(
                 Icon(
                     imageVector = getTreeFileIcon(fileName),
                     contentDescription = null,
-                    tint = statusColor,
+                    tint = if (fileStatus.status != FileStatus.UNCHANGED) statusColor else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // File Name
+            // File Name in clean standard system typography
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = if (isSmali && fileName.endsWith(".smali")) fileName.removeSuffix(".smali") else fileName,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (fileStatus.status != FileStatus.UNCHANGED) FontWeight.SemiBold else FontWeight.Normal,
-                    fontFamily = FontFamily.Monospace,
-                    color = if (fileStatus.status != FileStatus.UNCHANGED) statusColor else MaterialTheme.colorScheme.onSurface,
+                    fontWeight = if (fileStatus.status != FileStatus.UNCHANGED) FontWeight.Medium else FontWeight.Normal,
+                    fontSize = 13.5.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -573,8 +554,6 @@ fun TreeFileCard(
                         text = "from: ${fileStatus.originalPath}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary,
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.Monospace,
                         fontSize = 10.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -587,7 +566,6 @@ fun TreeFileCard(
                 Surface(
                     shape = RoundedCornerShape(4.dp),
                     color = statusColor.copy(alpha = 0.12f),
-                    border = androidx.compose.foundation.BorderStroke(0.8.dp, statusColor.copy(alpha = 0.35f)),
                     modifier = Modifier.padding(horizontal = 4.dp)
                 ) {
                     Text(
@@ -596,7 +574,7 @@ fun TreeFileCard(
                         color = statusColor,
                         fontWeight = FontWeight.Bold,
                         fontSize = 9.sp,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
             }

@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -31,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -638,24 +640,67 @@ fun CompareListScreen(
                         // Search Bar (Shown when toggled)
                         if (isExplorerSearchVisible) {
                             Spacer(modifier = Modifier.height(6.dp))
-                            OutlinedTextField(
-                                value = explorerSearchQuery,
-                                onValueChange = { viewModel.setExplorerSearchQuery(it) },
-                                placeholder = { Text("Filter current folder files...", fontSize = 12.sp) },
-                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                trailingIcon = {
-                                    if (explorerSearchQuery.isNotEmpty()) {
-                                        IconButton(onClick = { viewModel.setExplorerSearchQuery("") }) {
-                                            Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(14.dp))
-                                        }
-                                    }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                singleLine = true,
+                            Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(44.dp)
-                            )
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier.weight(1f),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        if (explorerSearchQuery.isEmpty()) {
+                                            Text(
+                                                text = "Filter current folder files...",
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontSize = 13.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                                                )
+                                            )
+                                        }
+                                        BasicTextField(
+                                            value = explorerSearchQuery,
+                                            onValueChange = { viewModel.setExplorerSearchQuery(it) },
+                                            singleLine = true,
+                                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    if (explorerSearchQuery.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { viewModel.setExplorerSearchQuery("") },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Clear",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -743,7 +788,10 @@ fun CompareListScreen(
                                     .weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
-                                items(explorerFilesList) { file ->
+                                items(
+                                    items = explorerFilesList,
+                                    key = { file -> file.absolutePath }
+                                ) { file ->
                                     val isZip = file.name.lowercase().endsWith(".zip") || file.name.lowercase().endsWith(".apk")
                                     val isDir = file.isDirectory
 
@@ -982,13 +1030,11 @@ fun CompareListScreen(
                                                     }
                                                     Text(
                                                         "DEX VIRTUAL SMALI",
-                                                        style = TextStyle(
-                                                            fontFamily = FontFamily.Monospace,
-                                                            fontSize = 11.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            letterSpacing = 1.4.sp,
-                                                            color = MaterialTheme.colorScheme.primary
-                                                        )
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        letterSpacing = 1.1.sp,
+                                                        color = MaterialTheme.colorScheme.primary
                                                     )
                                                 }
 
@@ -1036,12 +1082,10 @@ fun CompareListScreen(
 
                                             Text(
                                                 text = if (isCombinedMultidex) "Combined Multi-DEX ($sourceName  ➔  $modifiedName)" else "$activeDexVirtualPath ($sourceName  ➔  $modifiedName)",
-                                                style = TextStyle(
-                                                    fontFamily = FontFamily.Monospace,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                ),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -1054,13 +1098,11 @@ fun CompareListScreen(
                                         ) {
                                             Text(
                                                 "COMPARING",
-                                                style = TextStyle(
-                                                    fontFamily = FontFamily.Monospace,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    letterSpacing = 1.4.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 1.1.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             FilledTonalButton(
                                                 onClick = { showExitConfirmationDialog = true },
@@ -1080,12 +1122,10 @@ fun CompareListScreen(
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
                                             text = "$sourceName  ➔  $modifiedName",
-                                            style = TextStyle(
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            ),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -1743,25 +1783,19 @@ fun CompareListScreen(
                         ) {
                             Text(
                                 text = "CURRENT SESSION",
-                                style = TextStyle(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.2.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.1.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "$sourceName  ➔  $modifiedName",
-                                style = TextStyle(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                ),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
