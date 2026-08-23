@@ -704,118 +704,265 @@ fun DecompiledApkOptionsDialog(
     var ignoreRegisterCount by remember { mutableStateOf(currentOptions.ignoreRegisterCount) }
     var ignoreFieldInitialValues by remember { mutableStateOf(currentOptions.ignoreFieldInitialValues) }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        icon = {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-        },
-        shape = RoundedCornerShape(24.dp),
-        title = {
-            Text(
-                "APK, DEX & Smali Options",
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleLarge,
-                textAlign = TextAlign.Center
-            )
-        },
-        text = {
-            Column(
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(horizontal = 14.dp, vertical = 20.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { /* prevent dismiss */ }
+                    ),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 0.dp,
+                shadowElevation = 8.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             ) {
-                Text(
-                    text = "Configure DEX and Smali comparison rules:",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                
-                Spacer(modifier = Modifier.height(4.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 18.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    // Header Bar
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Android,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            Column {
+                                Text(
+                                    text = "APK, DEX & Smali Options",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 17.5.sp
+                                )
+                                Text(
+                                    text = "Configure bytecode comparison rules",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
 
-                SettingsSwitchRow(
-                    title = "Ignore Debug Info",
-                    subtitle = "Skip line numbers, local tables & debug info",
-                    checked = ignoreDebugInfo,
-                    onCheckedChange = { ignoreDebugInfo = it }
-                )
-                
-                SettingsSwitchRow(
-                    title = "Ignore Compilation Optimization",
-                    subtitle = "Skip synthetic helpers & bytecode variations",
-                    checked = ignoreCompilationOptimizations,
-                    onCheckedChange = { ignoreCompilationOptimizations = it }
-                )
-                
-                SettingsSwitchRow(
-                    title = "Ignore NOP Instructions",
-                    subtitle = "Skip padding & alignment nop bytecodes",
-                    checked = ignoreNopInstruction,
-                    onCheckedChange = { ignoreNopInstruction = it }
-                )
-                
-                SettingsSwitchRow(
-                    title = "Ignore Register Count",
-                    subtitle = "Skip register count differences in methods",
-                    checked = ignoreRegisterCount,
-                    onCheckedChange = { ignoreRegisterCount = it }
-                )
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
 
-                SettingsSwitchRow(
-                    title = "Ignore Field Default Values",
-                    subtitle = "Skip default/null field initializers in Smali",
-                    checked = ignoreFieldInitialValues,
-                    onCheckedChange = { ignoreFieldInitialValues = it }
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onConfirm(
-                        currentOptions.copy(
-                            ignoreDebugInfo = ignoreDebugInfo,
-                            ignoreCompilationOptimizations = ignoreCompilationOptimizations,
-                            ignoreNopInstruction = ignoreNopInstruction,
-                            ignoreRegisterCount = ignoreRegisterCount,
-                            ignoreFieldInitialValues = ignoreFieldInitialValues
-                        )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "BYTECODE FILTERING RULES",
+                        style = TextStyle(
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.1.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        ),
+                        modifier = Modifier.padding(bottom = 6.dp)
                     )
-                },
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                )
-            ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Start Comparison", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            SettingsSwitchRow(
+                                title = "Ignore Debug Info",
+                                subtitle = "Skip line numbers, local tables & debug info",
+                                checked = ignoreDebugInfo,
+                                onCheckedChange = { ignoreDebugInfo = it }
+                            )
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 2.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            )
+
+                            SettingsSwitchRow(
+                                title = "Ignore Compilation Optimization",
+                                subtitle = "Skip synthetic helpers & bytecode variations",
+                                checked = ignoreCompilationOptimizations,
+                                onCheckedChange = { ignoreCompilationOptimizations = it }
+                            )
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 2.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            )
+
+                            SettingsSwitchRow(
+                                title = "Ignore NOP Instructions",
+                                subtitle = "Skip padding & alignment nop bytecodes",
+                                checked = ignoreNopInstruction,
+                                onCheckedChange = { ignoreNopInstruction = it }
+                            )
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 2.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            )
+
+                            SettingsSwitchRow(
+                                title = "Ignore Register Count",
+                                subtitle = "Skip register count differences in methods",
+                                checked = ignoreRegisterCount,
+                                onCheckedChange = { ignoreRegisterCount = it }
+                            )
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 2.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            )
+
+                            SettingsSwitchRow(
+                                title = "Ignore Field Default Values",
+                                subtitle = "Skip default/null field initializers in Smali",
+                                checked = ignoreFieldInitialValues,
+                                onCheckedChange = { ignoreFieldInitialValues = it }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "These options normalize Smali bytecode decompilation to highlight actual functional code changes.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.5.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    // Bottom Action Buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                onConfirm(
+                                    currentOptions.copy(
+                                        ignoreDebugInfo = ignoreDebugInfo,
+                                        ignoreCompilationOptimizations = ignoreCompilationOptimizations,
+                                        ignoreNopInstruction = ignoreNopInstruction,
+                                        ignoreRegisterCount = ignoreRegisterCount,
+                                        ignoreFieldInitialValues = ignoreFieldInitialValues
+                                    )
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .height(46.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Start Comparison",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
         }
-    )
+    }
 }
 

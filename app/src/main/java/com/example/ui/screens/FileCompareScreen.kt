@@ -275,7 +275,7 @@ fun FileCompareScreen(
                                     }
                                 ) {
                                     Icon(
-                                        imageVector = if (isFilterActive) Icons.Filled.VisibilityOff else Icons.Outlined.VisibilityOff,
+                                        imageVector = if (isFilterActive) Icons.Filled.CenterFocusStrong else Icons.Outlined.CenterFocusStrong,
                                         contentDescription = if (isFilterActive) "Focus & Line Filters Active" else "Focus & Line Filters",
                                         tint = if (isFilterActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -718,12 +718,13 @@ fun FileCompareScreen(
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            modifier = Modifier.weight(1f, fill = false)
                                         ) {
                                             Icon(
-                                                imageVector = if (focusModeEnabled || hiddenLineKeywords.isNotEmpty()) Icons.Filled.VisibilityOff else Icons.Outlined.VisibilityOff,
+                                                imageVector = Icons.Outlined.CenterFocusStrong,
                                                 contentDescription = null,
-                                                tint = if (focusModeEnabled || hiddenLineKeywords.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                             Column {
@@ -746,12 +747,27 @@ fun FileCompareScreen(
                                             }
                                         }
 
-                                        Icon(
-                                            imageVector = Icons.Outlined.ArrowForwardIos,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                            modifier = Modifier.size(12.dp)
-                                        )
+                                        if (focusModeEnabled || hiddenLineKeywords.isNotEmpty()) {
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                            ) {
+                                                Text(
+                                                    text = "Active",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Outlined.ArrowForwardIos,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        }
                                     }
 
                                     Row(
@@ -933,7 +949,7 @@ fun FileCompareScreen(
                             modifier = Modifier.weight(1f, fill = false)
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.VisibilityOff,
+                                imageVector = Icons.Outlined.CenterFocusStrong,
                                 contentDescription = null,
                                 modifier = Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.primary
