@@ -1214,8 +1214,28 @@ object DexParser {
             return "v$r"
         }
 
-        // Pass 1: Identify all branch & handler target offsets
-        val targetPcs = mutableSetOf<Int>()
+        // Pass 1: Identify all branch & handler target offsets in Baksmali-style sequential order
+        var condCount = 0
+        var gotoCount = 0
+        var pswitchCount = 0
+        var sswitchCount = 0
+        var pswitchDataCount = 0
+        var sswitchDataCount = 0
+        var arrayDataCount = 0
+
+        val condLabels = mutableMapOf<Int, String>()
+        val gotoLabels = mutableMapOf<Int, String>()
+        val pswitchLabels = mutableMapOf<Int, String>()
+        val sswitchLabels = mutableMapOf<Int, String>()
+        val pswitchDataLabels = mutableMapOf<Int, String>()
+        val sswitchDataLabels = mutableMapOf<Int, String>()
+        val arrayDataLabels = mutableMapOf<Int, String>()
+
+        val tryStartLabels = mutableMapOf<Int, MutableList<String>>()
+        val tryEndLabels = mutableMapOf<Int, MutableList<String>>()
+        val catchLabels = mutableMapOf<Int, String>()
+        val catchAllLabels = mutableMapOf<Int, String>()
+
         var pc = 0
         while (pc < insnsSize) {
             val offset = pc
@@ -1225,7 +1245,9 @@ object DexParser {
                 val size = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
                 for (i in 0 until size) {
                     val target = buffer.readUInt(codeOff + 16 + (pc + 4 + i * 2) * 2)
-                    targetPcs.add(target)
+                    if (!pswitchLabels.containsKey(target)) {
+                        pswitchLabels[target] = ":pswitch_${Integer.toHexString(pswitchCount++)}"
+                    }
                 }
                 pc += (size * 2) + 4
                 continue
@@ -1233,7 +1255,9 @@ object DexParser {
                 val size = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
                 for (i in 0 until size) {
                     val target = buffer.readUInt(codeOff + 16 + (pc + 2 + size * 2 + i * 2) * 2)
-                    targetPcs.add(target)
+                    if (!sswitchLabels.containsKey(target)) {
+                        sswitchLabels[target] = ":sswitch_${Integer.toHexString(sswitchCount++)}"
+                    }
                 }
                 pc += (size * 4) + 2
                 continue
@@ -1254,7 +1278,10 @@ object DexParser {
                         if (opcode == 0x28) {
                             var a = (insn ushr 8) and 0xFF
                             if (a > 127) a -= 256
-                            targetPcs.add(offset + a)
+                            val target = offset + a
+                            if (!gotoLabels.containsKey(target)) {
+                                gotoLabels[target] = ":goto_${Integer.toHexString(gotoCount++)}"
+                            }
                         }
                     }
                     2 -> {
@@ -1262,15 +1289,24 @@ object DexParser {
                         when (opcode) {
                             0x29 -> {
                                 val a = insn2.toShort().toInt()
-                                targetPcs.add(offset + a)
+                                val target = offset + a
+                                if (!gotoLabels.containsKey(target)) {
+                                    gotoLabels[target] = ":goto_${Integer.toHexString(gotoCount++)}"
+                                }
                             }
                             in 0x32..0x37 -> {
                                 val c = insn2.toShort().toInt()
-                                targetPcs.add(offset + c)
+                                val target = offset + c
+                                if (!condLabels.containsKey(target)) {
+                                    condLabels[target] = ":cond_${Integer.toHexString(condCount++)}"
+                                }
                             }
                             in 0x38..0x3d -> {
                                 val b = insn2.toShort().toInt()
-                                targetPcs.add(offset + b)
+                                val target = offset + b
+                                if (!condLabels.containsKey(target)) {
+                                    condLabels[target] = ":cond_${Integer.toHexString(condCount++)}"
+                                }
                             }
                         }
                     }
@@ -1280,11 +1316,31 @@ object DexParser {
                         when (opcode) {
                             0x2a -> {
                                 val a = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                targetPcs.add(offset + a)
+                                val target = offset + a
+                                if (!gotoLabels.containsKey(target)) {
+                                    gotoLabels[target] = ":goto_${Integer.toHexString(gotoCount++)}"
+                                }
                             }
-                            0x2b, 0x2c, 0x26 -> {
+                            0x2b -> {
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                targetPcs.add(offset + b)
+                                val target = offset + b
+                                if (!pswitchDataLabels.containsKey(target)) {
+                                    pswitchDataLabels[target] = ":pswitch_data_${Integer.toHexString(pswitchDataCount++)}"
+                                }
+                            }
+                            0x2c -> {
+                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
+                                val target = offset + b
+                                if (!sswitchDataLabels.containsKey(target)) {
+                                    sswitchDataLabels[target] = ":sswitch_data_${Integer.toHexString(sswitchDataCount++)}"
+                                }
+                            }
+                            0x26 -> {
+                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
+                                val target = offset + b
+                                if (!arrayDataLabels.containsKey(target)) {
+                                    arrayDataLabels[target] = ":array_${Integer.toHexString(arrayDataCount++)}"
+                                }
                             }
                         }
                     }
@@ -1300,12 +1356,22 @@ object DexParser {
             val padding = if (insnsSize % 2 != 0) 2 else 0
             val triesOff = codeOff + 16 + insnsSize * 2 + padding
             val handlersListOff = triesOff + triesSize * 8
+            var tryCount = 0
+            var catchCount = 0
+            var catchAllCount = 0
+
             for (t in 0 until triesSize) {
                 val startAddr = buffer.readUInt(triesOff + t * 8)
                 val insnCount = buffer.readUShort(triesOff + t * 8 + 4)
+                val endAddr = startAddr + insnCount
                 val handlerOff = buffer.readUShort(triesOff + t * 8 + 6)
-                targetPcs.add(startAddr)
-                targetPcs.add(startAddr + insnCount)
+
+                val tryStartLabel = ":try_start_${Integer.toHexString(tryCount)}"
+                val tryEndLabel = ":try_end_${Integer.toHexString(tryCount)}"
+                tryCount++
+
+                tryStartLabels.getOrPut(startAddr) { mutableListOf() }.add(tryStartLabel)
+                tryEndLabels.getOrPut(endAddr) { mutableListOf() }.add(tryEndLabel)
 
                 val handlerPos = handlersListOff + handlerOff
                 val (hSize, hSizeLen) = buffer.readSleb128(handlerPos)
@@ -1318,17 +1384,35 @@ object DexParser {
                     val pAddr = buffer.readUleb128Packed(currH)
                     val addr = (pAddr and 0xFFFFFFFFL).toInt()
                     currH += (pAddr ushr 32).toInt()
-                    targetPcs.add(addr)
+                    
+                    val catchLabel = catchLabels.getOrPut(addr) { ":catch_${Integer.toHexString(catchCount++)}" }
                     val expType = toDescriptor(resolveType(typeIdx))
-                    catchDirectives.add(".catch $expType {:label_$startAddr .. :label_${startAddr + insnCount}} :label_$addr")
+                    catchDirectives.add(".catch $expType {$tryStartLabel .. $tryEndLabel} $catchLabel")
                 }
                 if (hSize <= 0) {
                     val pAll = buffer.readUleb128Packed(currH)
                     val catchAllAddr = (pAll and 0xFFFFFFFFL).toInt()
-                    targetPcs.add(catchAllAddr)
-                    catchDirectives.add(".catchall {:label_$startAddr .. :label_${startAddr + insnCount}} :label_$catchAllAddr")
+                    val catchAllLabel = catchAllLabels.getOrPut(catchAllAddr) { ":catchall_${Integer.toHexString(catchAllCount++)}" }
+                    catchDirectives.add(".catchall {$tryStartLabel .. $tryEndLabel} $catchAllLabel")
                 }
             }
+        }
+
+        // Helper to collect all labels starting at offset in standard smali order
+        fun getLabelsForOffset(offset: Int): List<String> {
+            val labels = mutableListOf<String>()
+            tryStartLabels[offset]?.let { labels.addAll(it) }
+            tryEndLabels[offset]?.let { labels.addAll(it) }
+            catchLabels[offset]?.let { labels.add(it) }
+            catchAllLabels[offset]?.let { labels.add(it) }
+            condLabels[offset]?.let { labels.add(it) }
+            gotoLabels[offset]?.let { labels.add(it) }
+            pswitchLabels[offset]?.let { labels.add(it) }
+            sswitchLabels[offset]?.let { labels.add(it) }
+            pswitchDataLabels[offset]?.let { labels.add(it) }
+            sswitchDataLabels[offset]?.let { labels.add(it) }
+            arrayDataLabels[offset]?.let { labels.add(it) }
+            return labels
         }
 
         // Pass 2: Disassemble instructions and payloads
@@ -1336,8 +1420,9 @@ object DexParser {
         pc = 0
         while (pc < insnsSize) {
             val offset = pc
-            if (targetPcs.contains(offset)) {
-                instructions.add(":label_$offset")
+            val labelsAtOffset = getLabelsForOffset(offset)
+            for (lbl in labelsAtOffset) {
+                instructions.add(lbl)
             }
             val insn = buffer.readUShort(codeOff + 16 + pc * 2)
 
@@ -1347,7 +1432,8 @@ object DexParser {
                 instructions.add(".packed-switch 0x${Integer.toHexString(firstKey)}")
                 for (i in 0 until size) {
                     val target = buffer.readUInt(codeOff + 16 + (pc + 4 + i * 2) * 2)
-                    instructions.add("    :label_$target")
+                    val label = pswitchLabels[target] ?: ":pswitch_$target"
+                    instructions.add("    $label")
                 }
                 instructions.add(".end packed-switch")
                 pc += (size * 2) + 4
@@ -1358,7 +1444,8 @@ object DexParser {
                 for (i in 0 until size) {
                     val key = buffer.readUInt(codeOff + 16 + (pc + 2 + i * 2) * 2)
                     val target = buffer.readUInt(codeOff + 16 + (pc + 2 + size * 2 + i * 2) * 2)
-                    instructions.add("    0x${Integer.toHexString(key)} -> :label_$target")
+                    val label = sswitchLabels[target] ?: ":sswitch_$target"
+                    instructions.add("    0x${Integer.toHexString(key)} -> $label")
                 }
                 instructions.add(".end sparse-switch")
                 pc += (size * 4) + 2
@@ -1420,7 +1507,9 @@ object DexParser {
                             0x28 -> {
                                 var a = (insn ushr 8) and 0xFF
                                 if (a > 127) a -= 256
-                                "goto :label_${offset + a}"
+                                val target = offset + a
+                                val lbl = gotoLabels[target] ?: ":goto_$target"
+                                "goto $lbl"
                             }
                             in 0x7b..0x8f, in 0xb0..0xcf -> {
                                 val a = (insn ushr 8) and 0xF
@@ -1472,7 +1561,9 @@ object DexParser {
                             }
                             0x29 -> {
                                 val a = insn2.toShort().toInt()
-                                "goto/16 :label_${offset + a}"
+                                val target = offset + a
+                                val lbl = gotoLabels[target] ?: ":goto_$target"
+                                "goto/16 $lbl"
                             }
                             in 0x2d..0x31 -> {
                                 val a = (insn ushr 8) and 0xFF
@@ -1484,12 +1575,16 @@ object DexParser {
                                 val a = (insn ushr 8) and 0xF
                                 val b = (insn ushr 12) and 0xF
                                 val c = insn2.toShort().toInt()
-                                "$name ${formatReg(a)}, ${formatReg(b)}, :label_${offset + c}"
+                                val target = offset + c
+                                val lbl = condLabels[target] ?: ":cond_$target"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, $lbl"
                             }
                             in 0x38..0x3d -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2.toShort().toInt()
-                                "$name ${formatReg(a)}, :label_${offset + b}"
+                                val target = offset + b
+                                val lbl = condLabels[target] ?: ":cond_$target"
+                                "$name ${formatReg(a)}, $lbl"
                             }
                             in 0x44..0x51 -> {
                                 val a = (insn ushr 8) and 0xFF
@@ -1565,7 +1660,9 @@ object DexParser {
                             }
                             0x2a -> {
                                 val a = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                "goto/32 :label_${offset + a}"
+                                val target = offset + a
+                                val lbl = gotoLabels[target] ?: ":goto_$target"
+                                "goto/32 $lbl"
                             }
                             0x24 -> {
                                 val count = (insn ushr 12) and 0xF
@@ -1586,10 +1683,26 @@ object DexParser {
                                 val args = if (count > 0) "${formatReg(startReg)}..${formatReg(startReg + count - 1)}" else ""
                                 "filled-new-array/range {$args}, ${toDescriptor(resolveType(typeIdx))}"
                             }
-                            0x2b, 0x2c, 0x26 -> {
+                            0x2b -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                "$name ${formatReg(a)}, :label_${offset + b}"
+                                val target = offset + b
+                                val lbl = pswitchDataLabels[target] ?: ":pswitch_data_$target"
+                                "$name ${formatReg(a)}, $lbl"
+                            }
+                            0x2c -> {
+                                val a = (insn ushr 8) and 0xFF
+                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
+                                val target = offset + b
+                                val lbl = sswitchDataLabels[target] ?: ":sswitch_data_$target"
+                                "$name ${formatReg(a)}, $lbl"
+                            }
+                            0x26 -> {
+                                val a = (insn ushr 8) and 0xFF
+                                val b = (insn2 and 0xFFFF) or (insn3 shl 16)
+                                val target = offset + b
+                                val lbl = arrayDataLabels[target] ?: ":array_$target"
+                                "$name ${formatReg(a)}, $lbl"
                             }
                             in 0x6e..0x72 -> {
                                 val count = (insn ushr 12) and 0xF
