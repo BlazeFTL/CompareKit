@@ -146,15 +146,39 @@ fun toSmaliSignature(signature: String): String {
     return "($smaliParams)$smaliReturn"
 }
 
+fun formatLiteralInt(v: Int): String {
+    return if (v < 0) {
+        if (v == Int.MIN_VALUE) {
+            "-0x80000000"
+        } else {
+            "-0x${java.lang.Integer.toHexString(-v)}"
+        }
+    } else {
+        "0x${java.lang.Integer.toHexString(v)}"
+    }
+}
+
+fun formatLiteralLong(v: Long): String {
+    return if (v < 0L) {
+        if (v == Long.MIN_VALUE) {
+            "-0x8000000000000000L"
+        } else {
+            "-0x${java.lang.Long.toHexString(-v)}L"
+        }
+    } else {
+        "0x${java.lang.Long.toHexString(v)}L"
+    }
+}
+
 fun isDefaultValue(type: String, value: String?): Boolean {
     if (value == null) return true
     if (value == "null") return true
     return when (type) {
         "boolean" -> value == "false" || value == "0" || value == "0x0"
         "float" -> value == "0.0f" || value == "0f" || value == "0.0" || value == "0"
-        "double" -> value == "0.0" || value == "0" || value == "0x0"
-        "byte", "short", "char", "int", "long" -> value == "0" || value == "0x0" || value == "0x00"
-        else -> value == "0" || value == "0x0" || value == "0x00" || value == "null"
+        "double" -> value == "0.0" || value == "0" || value == "0x0" || value == "0.0L"
+        "byte", "short", "char", "int", "long" -> value == "0" || value == "0x0" || value == "0x00" || value == "0x0L" || value == "0L"
+        else -> value == "0" || value == "0x0" || value == "0x00" || value == "0x0L" || value == "null"
     }
 }
 
@@ -1429,7 +1453,7 @@ object DexParser {
             if (insn == 0x0100) { // PACKED_SWITCH_PAYLOAD
                 val size = buffer.readUShort(codeOff + 16 + (pc + 1) * 2)
                 val firstKey = buffer.readUInt(codeOff + 16 + (pc + 2) * 2)
-                instructions.add(".packed-switch 0x${Integer.toHexString(firstKey)}")
+                instructions.add(".packed-switch ${formatLiteralInt(firstKey.toInt())}")
                 for (i in 0 until size) {
                     val target = buffer.readUInt(codeOff + 16 + (pc + 4 + i * 2) * 2)
                     val label = pswitchLabels[target] ?: ":pswitch_$target"
@@ -1445,7 +1469,7 @@ object DexParser {
                     val key = buffer.readUInt(codeOff + 16 + (pc + 2 + i * 2) * 2)
                     val target = buffer.readUInt(codeOff + 16 + (pc + 2 + size * 2 + i * 2) * 2)
                     val label = sswitchLabels[target] ?: ":sswitch_$target"
-                    instructions.add("    0x${Integer.toHexString(key)} -> $label")
+                    instructions.add("    ${formatLiteralInt(key.toInt())} -> $label")
                 }
                 instructions.add(".end sparse-switch")
                 pc += (size * 4) + 2
@@ -1497,7 +1521,7 @@ object DexParser {
                                 val a = (insn ushr 8) and 0xF
                                 var b = (insn ushr 12) and 0xF
                                 if (b > 7) b -= 16
-                                "$name ${formatReg(a)}, $b"
+                                "$name ${formatReg(a)}, ${formatLiteralInt(b)}"
                             }
                             0x21 -> {
                                 val a = (insn ushr 8) and 0xF
@@ -1527,15 +1551,25 @@ object DexParser {
                                 val b = insn2
                                 "$name ${formatReg(a)}, ${formatReg(b)}"
                             }
-                            0x13, 0x16 -> {
+                            0x13 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2.toShort().toInt()
-                                "$name ${formatReg(a)}, $b"
+                                "$name ${formatReg(a)}, ${formatLiteralInt(b)}"
                             }
-                            0x15, 0x19 -> {
+                            0x16 -> {
                                 val a = (insn ushr 8) and 0xFF
-                                val b = insn2.toShort().toInt()
-                                "$name ${formatReg(a)}, 0x${Integer.toHexString(b shl 16)}"
+                                val b = insn2.toShort().toLong()
+                                "$name ${formatReg(a)}, ${formatLiteralLong(b)}"
+                            }
+                            0x15 -> {
+                                val a = (insn ushr 8) and 0xFF
+                                val b = insn2.toInt() shl 16
+                                "$name ${formatReg(a)}, ${formatLiteralInt(b)}"
+                            }
+                            0x19 -> {
+                                val a = (insn ushr 8) and 0xFF
+                                val b = (insn2.toLong() and 0xFFFFL) shl 48
+                                "$name ${formatReg(a)}, ${formatLiteralLong(b)}"
                             }
                             0x1a -> {
                                 val a = (insn ushr 8) and 0xFF
@@ -1625,14 +1659,14 @@ object DexParser {
                                 val a = (insn ushr 8) and 0xF
                                 val b = (insn ushr 12) and 0xF
                                 val c = insn2.toShort().toInt()
-                                "$name ${formatReg(a)}, ${formatReg(b)}, $c"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, ${formatLiteralInt(c)}"
                             }
                             in 0xd8..0xe2 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = insn2 and 0xFF
                                 var c = insn2 ushr 8
                                 if (c > 127) c -= 256
-                                "$name ${formatReg(a)}, ${formatReg(b)}, $c"
+                                "$name ${formatReg(a)}, ${formatReg(b)}, ${formatLiteralInt(c)}"
                             }
                             else -> "$name ${formatReg((insn ushr 8) and 0xFF)}, $insn2"
                         }
@@ -1642,10 +1676,15 @@ object DexParser {
                         val insn3 = buffer.readUShort(codeOff + 16 + (pc + 2) * 2)
                         when (opcode) {
                             0x03, 0x06, 0x09 -> "$name ${formatReg(insn2)}, ${formatReg(insn3)}"
-                            0x14, 0x17 -> {
+                            0x14 -> {
                                 val a = (insn ushr 8) and 0xFF
                                 val b = (insn2 and 0xFFFF) or (insn3 shl 16)
-                                "$name ${formatReg(a)}, 0x${Integer.toHexString(b)}"
+                                "$name ${formatReg(a)}, ${formatLiteralInt(b)}"
+                            }
+                            0x17 -> {
+                                val a = (insn ushr 8) and 0xFF
+                                val b = ((insn2 and 0xFFFF) or (insn3 shl 16)).toLong()
+                                "$name ${formatReg(a)}, ${formatLiteralLong(b)}"
                             }
                             0x1b -> {
                                 val a = (insn ushr 8) and 0xFF
@@ -1746,7 +1785,7 @@ object DexParser {
                         val insn5 = buffer.readUShort(codeOff + 16 + (pc + 4) * 2).toLong() and 0xFFFFL
                         val a = (insn ushr 8) and 0xFF
                         val v = insn2 or (insn3 shl 16) or (insn4 shl 32) or (insn5 shl 48)
-                        "const-wide ${formatReg(a)}, 0x${java.lang.Long.toHexString(v)}L"
+                        "const-wide ${formatReg(a)}, ${formatLiteralLong(v)}"
                     }
                     else -> name
                 }
@@ -1781,7 +1820,7 @@ object DexParser {
         return when (valueType) {
             0x00 -> { // BYTE
                 val v = buffer.readByte(curr).toInt()
-                Pair("0x${Integer.toHexString(v and 0xFF)}", curr + 1 - offset)
+                Pair(formatLiteralInt(v), curr + 1 - offset)
             }
             0x02 -> { // SHORT
                 val size = valueArg + 1
@@ -1791,7 +1830,7 @@ object DexParser {
                 }
                 val shift = (4 - size) * 8
                 val extended = (v shl shift) shr shift
-                Pair("0x${Integer.toHexString(extended)}", curr + size - offset)
+                Pair(formatLiteralInt(extended), curr + size - offset)
             }
             0x03 -> { // CHAR
                 val size = valueArg + 1
@@ -1809,7 +1848,7 @@ object DexParser {
                 }
                 val shift = (4 - size) * 8
                 val extended = (v shl shift) shr shift
-                Pair("0x${Integer.toHexString(extended)}", curr + size - offset)
+                Pair(formatLiteralInt(extended), curr + size - offset)
             }
             0x06 -> { // LONG
                 val size = valueArg + 1
@@ -1819,7 +1858,7 @@ object DexParser {
                 }
                 val shift = (8 - size) * 8
                 val extended = (v shl shift) shr shift
-                Pair("0x${java.lang.Long.toHexString(extended)}", curr + size - offset)
+                Pair(formatLiteralLong(extended), curr + size - offset)
             }
             0x10 -> { // FLOAT
                 val size = valueArg + 1

@@ -38,7 +38,7 @@ object SyntaxHighlighter {
     private val SMALI_LABEL_REGEX = ":[a-zA-Z0-9_]+".toRegex()
     private val SMALI_REGISTER_REGEX = "\\b[vp][0-9]+\\b".toRegex()
     private val SMALI_COMMENT_REGEX = "#.*".toRegex()
-    private val SMALI_NUMBER_REGEX = "-?0x[0-9a-fA-F]+|-?\\d+L?".toRegex()
+    private val SMALI_NUMBER_REGEX = "-?0x[0-9a-fA-F]+L?|-?\\d+L?".toRegex()
 
     fun highlight(text: String, filename: String): AnnotatedString {
         if (text.isEmpty()) return AnnotatedString("")
