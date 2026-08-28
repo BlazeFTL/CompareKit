@@ -282,6 +282,10 @@ class CompareViewModel : ViewModel() {
 
             withContext(Dispatchers.IO) {
                 try {
+                    synchronized(virtualDexSourceClasses) { virtualDexSourceClasses.clear() }
+                    synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses.clear() }
+                    System.gc()
+
                     val targetPath = if (_isCombinedMultidex.value) "" else cleanPath
                     val srcDexFiles = getAllDexFiles(isSource = true, targetPath)
                     val modDexFiles = getAllDexFiles(isSource = false, targetPath)
@@ -362,11 +366,15 @@ class CompareViewModel : ViewModel() {
                                 if (srcCls.signature == modCls.signature) {
                                     FileStatus.UNCHANGED
                                 } else if (_diffOptions.value.ignoredLineKeywords.isNotEmpty()) {
-                                    val srcText = srcCls.toTextRepresentation(opts)
-                                    val modText = modCls.toTextRepresentation(opts)
-                                    if (FileHelper.areContentsEqual(srcText.lines(), modText.lines(), _diffOptions.value)) {
-                                        FileStatus.UNCHANGED
-                                    } else {
+                                    try {
+                                        val srcText = srcCls.toTextRepresentation(opts)
+                                        val modText = modCls.toTextRepresentation(opts)
+                                        if (FileHelper.areStringLinesEqual(srcText, modText, _diffOptions.value)) {
+                                            FileStatus.UNCHANGED
+                                        } else {
+                                            FileStatus.MODIFIED
+                                        }
+                                    } catch (e: Throwable) {
                                         FileStatus.MODIFIED
                                     }
                                 } else {
@@ -1230,15 +1238,72 @@ class CompareViewModel : ViewModel() {
         val keywords = _hiddenLineKeywords.value
         _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = keywords)
 
+        val currentFile = _selectedFile.value
+        if (currentFile != null) {
+            // Recalculate only the currently open file to prevent high memory usage and avoid full background re-comparison
+            loadDiffForFile(currentFile)
+            return
+        }
+
         if (_activeDexVirtualPath.value != null) {
-            openDexVirtualComparison(_activeDexVirtualPath.value ?: "classes.dex")
+            // Re-evaluate in-memory virtual classes without reloading DEX files from disk
+            refreshDexVirtualClassesWithKeywords()
         } else if (context != null) {
             performComparison(context)
         } else {
             runComparison()
         }
-        _selectedFile.value?.let { fileStatus ->
-            loadDiffForFile(fileStatus)
+    }
+
+    private fun refreshDexVirtualClassesWithKeywords() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isProcessing.value = true
+            _compareProgress.value = 0.5f
+            try {
+                val opts = _dexCompareOptions.value
+                val diffOpts = _diffOptions.value
+                val currentList = _fileList.value
+                if (currentList.isEmpty()) return@launch
+
+                val updatedList = currentList.map { item ->
+                    val className = item.relativePath.removePrefix("/").removeSuffix(".smali").replace('/', '.')
+                    val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
+                    val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
+
+                    val newStatus = when {
+                        srcCls != null && modCls != null -> {
+                            if (srcCls.signature == modCls.signature) {
+                                FileStatus.UNCHANGED
+                            } else if (diffOpts.ignoredLineKeywords.isNotEmpty()) {
+                                try {
+                                    val srcText = srcCls.toTextRepresentation(opts)
+                                    val modText = modCls.toTextRepresentation(opts)
+                                    if (FileHelper.areStringLinesEqual(srcText, modText, diffOpts)) {
+                                        FileStatus.UNCHANGED
+                                    } else {
+                                        FileStatus.MODIFIED
+                                    }
+                                } catch (e: Throwable) {
+                                    FileStatus.MODIFIED
+                                }
+                            } else {
+                                FileStatus.MODIFIED
+                            }
+                        }
+                        srcCls != null -> FileStatus.DELETED
+                        modCls != null -> FileStatus.ADDED
+                        else -> item.status
+                    }
+                    if (newStatus != item.status) item.copy(status = newStatus) else item
+                }
+                _fileList.value = updatedList
+            } catch (e: Throwable) {
+                // Ignore safely
+            } finally {
+                _compareProgress.value = null
+                _isProcessing.value = false
+                System.gc()
+            }
         }
     }
 
@@ -1300,6 +1365,13 @@ class CompareViewModel : ViewModel() {
 
                         val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
                         _diffLines.value = diff
+                        val hasChanges = diff.any { it.type == DiffType.INSERT || it.type == DiffType.DELETE || it.type == DiffType.MODIFIED }
+                        if (!hasChanges && fileStatus.status != FileStatus.UNCHANGED) {
+                            val updated = _fileList.value.map { item ->
+                                if (item.relativePath == fileStatus.relativePath) item.copy(status = FileStatus.UNCHANGED) else item
+                            }
+                            _fileList.value = updated
+                        }
                         return@withContext
                     }
 
@@ -1328,11 +1400,15 @@ class CompareViewModel : ViewModel() {
                                     if (srcCls.signature == modCls.signature) {
                                         DexStatus.UNCHANGED
                                     } else if (_diffOptions.value.ignoredLineKeywords.isNotEmpty()) {
-                                        val srcText = srcCls.toTextRepresentation(opts)
-                                        val modText = modCls.toTextRepresentation(opts)
-                                        if (FileHelper.areContentsEqual(srcText.lines(), modText.lines(), _diffOptions.value)) {
-                                            DexStatus.UNCHANGED
-                                        } else {
+                                        try {
+                                            val srcText = srcCls.toTextRepresentation(opts)
+                                            val modText = modCls.toTextRepresentation(opts)
+                                            if (FileHelper.areStringLinesEqual(srcText, modText, _diffOptions.value)) {
+                                                DexStatus.UNCHANGED
+                                            } else {
+                                                DexStatus.MODIFIED
+                                            }
+                                        } catch (e: Throwable) {
                                             DexStatus.MODIFIED
                                         }
                                     } else {

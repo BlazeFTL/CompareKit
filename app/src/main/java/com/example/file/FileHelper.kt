@@ -271,7 +271,7 @@ object FileHelper {
         }
 
         val completedCount = AtomicInteger(0)
-        val semaphore = Semaphore(64)
+        val semaphore = Semaphore(16)
         val lastProgressUpdate = AtomicLong(0)
 
         val srcZip = try { ZipFile(srcZipFile) } catch (e: Exception) { null }
@@ -291,19 +291,15 @@ object FileHelper {
                             } else {
                                 val isBin = isBinaryExtension(path)
                                 if (path.lowercase().endsWith(".dex")) {
-                                    val srcBytes = if (srcZip != null) srcZip.getInputStream(srcEntry).use { it.readBytes() } else ByteArray(0)
-                                    val modBytes = if (modZip != null) modZip.getInputStream(modEntry).use { it.readBytes() } else ByteArray(0)
-                                    if (DexParser.areDexFilesSemanticallyEqual(srcBytes, modBytes, dexOptions, options)) {
-                                        FileStatus.UNCHANGED
-                                    } else {
-                                        FileStatus.MODIFIED
-                                    }
+                                    // Mismatched CRC/size means DEX is modified.
+                                    // Detailed semantic class-by-class comparison is done when viewing DEX virtual smali list.
+                                    FileStatus.MODIFIED
                                 } else if (path.lowercase().endsWith(".xml")) {
                                     val srcBytes = if (srcZip != null) srcZip.getInputStream(srcEntry).use { it.readBytes() } else ByteArray(0)
                                     val modBytes = if (modZip != null) modZip.getInputStream(modEntry).use { it.readBytes() } else ByteArray(0)
                                     val srcDecoded = if (AxmlDecoder.isBinaryXml(srcBytes)) AxmlDecoder.decode(srcBytes) else String(srcBytes, Charsets.UTF_8)
                                     val modDecoded = if (AxmlDecoder.isBinaryXml(modBytes)) AxmlDecoder.decode(modBytes) else String(modBytes, Charsets.UTF_8)
-                                    if (areContentsEqual(srcDecoded.lines(), modDecoded.lines(), options)) {
+                                    if (areStringLinesEqual(srcDecoded, modDecoded, options)) {
                                         FileStatus.UNCHANGED
                                     } else {
                                         FileStatus.MODIFIED
@@ -485,8 +481,6 @@ object FileHelper {
                             if (path.lowercase().endsWith(".dex")) {
                                 if (areBinaryFilesEqual(srcFile, modFile)) {
                                     FileStatus.UNCHANGED
-                                } else if (DexParser.areDexFilesSemanticallyEqual(srcFile, modFile, dexOptions, options)) {
-                                    FileStatus.UNCHANGED
                                 } else {
                                     FileStatus.MODIFIED
                                 }
@@ -629,47 +623,60 @@ object FileHelper {
         }
     }
 
-    internal fun areContentsEqual(
-        src: List<String>,
-        mod: List<String>,
+    private val WHITESPACE_REGEX = "\\s+".toRegex()
+
+    internal fun areSequencesEqual(
+        sSeq: Sequence<String>,
+        mSeq: Sequence<String>,
         options: DiffOptions
     ): Boolean {
-        var sFiltered = src
-        var mFiltered = mod
+        val hasKeywords = options.ignoredLineKeywords.isNotEmpty()
+        val ignoreEmpty = options.ignoreEmptyLines
 
-        if (options.ignoredLineKeywords.isNotEmpty()) {
-            sFiltered = sFiltered.filter { line ->
-                !options.ignoredLineKeywords.any { kw ->
-                    line.contains(kw, ignoreCase = !options.matchCase)
+        fun shouldKeep(line: String): Boolean {
+            if (ignoreEmpty && line.isBlank()) return false
+            if (hasKeywords) {
+                for (kw in options.ignoredLineKeywords) {
+                    if (kw.isNotBlank() && line.contains(kw, ignoreCase = !options.matchCase)) return false
                 }
             }
-            mFiltered = mFiltered.filter { line ->
-                !options.ignoredLineKeywords.any { kw ->
-                    line.contains(kw, ignoreCase = !options.matchCase)
-                }
-            }
+            return true
         }
 
-        if (options.ignoreEmptyLines) {
-            sFiltered = sFiltered.filter { it.isNotBlank() }
-            mFiltered = mFiltered.filter { it.isNotBlank() }
-        }
+        val sIter = sSeq.filter(::shouldKeep).iterator()
+        val mIter = mSeq.filter(::shouldKeep).iterator()
 
-        if (sFiltered.size != mFiltered.size) return false
-        for (i in sFiltered.indices) {
-            var sLine = sFiltered[i]
-            var mLine = mFiltered[i]
+        while (sIter.hasNext() && mIter.hasNext()) {
+            var sLine = sIter.next()
+            var mLine = mIter.next()
             if (!options.matchCase) {
                 sLine = sLine.lowercase()
                 mLine = mLine.lowercase()
             }
             if (options.ignoreWhitespace) {
-                sLine = sLine.trim().replace("\\s+".toRegex(), " ")
-                mLine = mLine.trim().replace("\\s+".toRegex(), " ")
+                sLine = sLine.trim().replace(WHITESPACE_REGEX, " ")
+                mLine = mLine.trim().replace(WHITESPACE_REGEX, " ")
             }
             if (sLine != mLine) return false
         }
-        return true
+
+        return !sIter.hasNext() && !mIter.hasNext()
+    }
+
+    internal fun areContentsEqual(
+        src: List<String>,
+        mod: List<String>,
+        options: DiffOptions
+    ): Boolean {
+        return areSequencesEqual(src.asSequence(), mod.asSequence(), options)
+    }
+
+    internal fun areStringLinesEqual(
+        srcText: CharSequence,
+        modText: CharSequence,
+        options: DiffOptions
+    ): Boolean {
+        return areSequencesEqual(srcText.lineSequence(), modText.lineSequence(), options)
     }
 
     fun extractZip(context: Context, zipUri: Uri, destDir: File): Boolean {

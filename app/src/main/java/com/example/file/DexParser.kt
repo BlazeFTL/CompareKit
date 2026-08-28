@@ -1990,9 +1990,9 @@ object DexParser {
                 val cls2 = classes2[className] ?: return false
                 if (cls1.signature != cls2.signature) {
                     if (diffOptions != null && diffOptions.ignoredLineKeywords.isNotEmpty()) {
-                        val sLines = cls1.toTextRepresentation(options).lines()
-                        val mLines = cls2.toTextRepresentation(options).lines()
-                        if (!FileHelper.areContentsEqual(sLines, mLines, diffOptions)) {
+                        val sText = cls1.toTextRepresentation(options)
+                        val mText = cls2.toTextRepresentation(options)
+                        if (!FileHelper.areStringLinesEqual(sText, mText, diffOptions)) {
                             return false
                         }
                     } else {
@@ -2001,7 +2001,7 @@ object DexParser {
                 }
             }
             true
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             false
         }
     }

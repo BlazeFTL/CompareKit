@@ -56,221 +56,227 @@ object MyersDiff {
             return origIndices.map { idx -> DiffItem(DiffType.DELETE, original[idx], originalIndex = idx) }
         }
 
-        // Classic Myers Diff algorithm
-        val max = n + m
-        // We're indexing with k from -max to max. The array size is 2 * max + 1
-        val v = IntArray(2 * max + 1)
-        val trace = ArrayList<IntArray>()
-
-        var found = false
-        for (d in 0..max) {
-            val vCopy = v.clone()
-            trace.add(vCopy)
-
-            for (k in -d..d step 2) {
-                val idx = k + max
-                var x: Int
-                if (k == -d || (k != d && v[idx - 1] < v[idx + 1])) {
-                    x = v[idx + 1]
-                } else {
-                    x = v[idx - 1] + 1
-                }
-                var y = x - k
-
-                while (x < n && y < m && 
-                    processedOriginal[origIndices[x]] == processedRevised[revIndices[y]]
-                ) {
-                    x++
-                    y++
-                }
-                v[idx] = x
-                if (x >= n && y >= m) {
-                    found = true
-                    break
-                }
-            }
-            if (found) break
+        // 1. Trim common prefix
+        var start = 0
+        while (start < n && start < m && processedOriginal[origIndices[start]] == processedRevised[revIndices[start]]) {
+            start++
         }
 
-        // Backtracking
-        val path = ArrayList<Pair<Int, Int>>()
-        var currX = n
-        var currY = m
-        var d = trace.size - 1
-
-        while (currX > 0 || currY > 0) {
-            if (d < 0) break
-            val k = currX - currY
-            val idx = k + max
-            val vD = trace[d]
-
-            val kPrev = if (k == -d || (k != d && vD[idx - 1] < vD[idx + 1])) {
-                k + 1
-            } else {
-                k - 1
-            }
-            val prevX = vD[kPrev + max]
-            val prevY = prevX - kPrev
-
-            while (currX > prevX && currY > prevY) {
-                path.add((currX - 1) to (currY - 1))
-                currX--
-                currY--
-            }
-
-            if (currX > 0 || currY > 0) {
-                path.add(currX to currY)
-            }
-
-            currX = prevX
-            currY = prevY
-            d--
+        // 2. Trim common suffix
+        var endOrig = n - 1
+        var endRev = m - 1
+        while (endOrig >= start && endRev >= start && processedOriginal[origIndices[endOrig]] == processedRevised[revIndices[endRev]]) {
+            endOrig--
+            endRev--
         }
-
-        path.reverse()
 
         val rawResult = ArrayList<DiffItem<String>>()
-        var lastX = 0
-        var lastY = 0
 
-        for (step in path) {
-            val px = step.first
-            val py = step.second
-            if (px == lastX && py == lastY + 1) {
-                // Insert
-                val realY = revIndices[lastY]
+        // Add prefix items
+        for (i in 0 until start) {
+            val realX = origIndices[i]
+            val realY = revIndices[i]
+            rawResult.add(DiffItem(DiffType.EQUAL, original[realX], originalIndex = realX, revisedIndex = realY))
+        }
+
+        val subN = endOrig - start + 1
+        val subM = endRev - start + 1
+
+        if (subN == 0 && subM > 0) {
+            for (j in start..endRev) {
+                val realY = revIndices[j]
                 rawResult.add(DiffItem(DiffType.INSERT, revised[realY], revisedIndex = realY))
-                lastY++
-            } else if (px == lastX + 1 && py == lastY) {
-                // Delete
-                val realX = origIndices[lastX]
+            }
+        } else if (subN > 0 && subM == 0) {
+            for (i in start..endOrig) {
+                val realX = origIndices[i]
                 rawResult.add(DiffItem(DiffType.DELETE, original[realX], originalIndex = realX))
-                lastX++
+            }
+        } else if (subN > 0 && subM > 0) {
+            // Myers Diff algorithm on the differing middle window
+            val max = subN + subM
+            val maxD = minOf(max, 1500) // Memory safety limit against OOM on totally divergent files
+            val v = IntArray(2 * max + 1)
+            val trace = ArrayList<IntArray>()
+
+            var found = false
+            for (d in 0..maxD) {
+                val vCopy = v.clone()
+                trace.add(vCopy)
+
+                for (k in -d..d step 2) {
+                    val idx = k + max
+                    var x: Int
+                    if (k == -d || (k != d && v[idx - 1] < v[idx + 1])) {
+                        x = v[idx + 1]
+                    } else {
+                        x = v[idx - 1] + 1
+                    }
+                    var y = x - k
+
+                    while (x < subN && y < subM &&
+                        processedOriginal[origIndices[start + x]] == processedRevised[revIndices[start + y]]
+                    ) {
+                        x++
+                        y++
+                    }
+                    v[idx] = x
+                    if (x >= subN && y >= subM) {
+                        found = true
+                        break
+                    }
+                }
+                if (found) break
+            }
+
+            if (found) {
+                // Backtracking
+                val path = ArrayList<Pair<Int, Int>>()
+                var currX = subN
+                var currY = subM
+                var d = trace.size - 1
+
+                while (currX > 0 || currY > 0) {
+                    if (d < 0) break
+                    val k = currX - currY
+                    val idx = k + max
+                    val vD = trace[d]
+
+                    val kPrev = if (k == -d || (k != d && vD[idx - 1] < vD[idx + 1])) {
+                        k + 1
+                    } else {
+                        k - 1
+                    }
+                    val prevX = vD[kPrev + max]
+                    val prevY = prevX - kPrev
+
+                    while (currX > prevX && currY > prevY) {
+                        path.add((currX - 1) to (currY - 1))
+                        currX--
+                        currY--
+                    }
+
+                    if (currX > 0 || currY > 0) {
+                        path.add(currX to currY)
+                    }
+
+                    currX = prevX
+                    currY = prevY
+                    d--
+                }
+
+                path.reverse()
+
+                var lastX = 0
+                var lastY = 0
+
+                for (step in path) {
+                    val px = step.first
+                    val py = step.second
+                    if (px == lastX && py == lastY + 1) {
+                        val realY = revIndices[start + lastY]
+                        rawResult.add(DiffItem(DiffType.INSERT, revised[realY], revisedIndex = realY))
+                        lastY++
+                    } else if (px == lastX + 1 && py == lastY) {
+                        val realX = origIndices[start + lastX]
+                        rawResult.add(DiffItem(DiffType.DELETE, original[realX], originalIndex = realX))
+                        lastX++
+                    } else {
+                        val realX = origIndices[start + lastX]
+                        val realY = revIndices[start + lastY]
+                        rawResult.add(DiffItem(DiffType.EQUAL, original[realX], originalIndex = realX, revisedIndex = realY))
+                        lastX++
+                        lastY++
+                    }
+                }
+
+                while (lastX < subN || lastY < subM) {
+                    if (lastX < subN && lastY < subM) {
+                        val realX = origIndices[start + lastX]
+                        val realY = revIndices[start + lastY]
+                        rawResult.add(DiffItem(DiffType.EQUAL, original[realX], originalIndex = realX, revisedIndex = realY))
+                        lastX++
+                        lastY++
+                    } else if (lastY < subM) {
+                        val realY = revIndices[start + lastY]
+                        rawResult.add(DiffItem(DiffType.INSERT, revised[realY], revisedIndex = realY))
+                        lastY++
+                    } else {
+                        val realX = origIndices[start + lastX]
+                        rawResult.add(DiffItem(DiffType.DELETE, original[realX], originalIndex = realX))
+                        lastX++
+                    }
+                }
             } else {
-                // Equal
-                val realX = origIndices[lastX]
-                val realY = revIndices[lastY]
-                rawResult.add(DiffItem(DiffType.EQUAL, original[realX], originalIndex = realX, revisedIndex = realY))
-                lastX++
-                lastY++
+                // Fallback for huge divergent blocks to prevent OOM
+                for (i in start..endOrig) {
+                    val realX = origIndices[i]
+                    rawResult.add(DiffItem(DiffType.DELETE, original[realX], originalIndex = realX))
+                }
+                for (j in start..endRev) {
+                    val realY = revIndices[j]
+                    rawResult.add(DiffItem(DiffType.INSERT, revised[realY], revisedIndex = realY))
+                }
             }
         }
 
-        // Add any remaining
-        while (lastX < n || lastY < m) {
-            if (lastX < n && lastY < m) {
-                val realX = origIndices[lastX]
-                val realY = revIndices[lastY]
-                rawResult.add(DiffItem(DiffType.EQUAL, original[realX], originalIndex = realX, revisedIndex = realY))
-                lastX++
-                lastY++
-            } else if (lastY < m) {
-                val realY = revIndices[lastY]
-                rawResult.add(DiffItem(DiffType.INSERT, revised[realY], revisedIndex = realY))
-                lastY++
-            } else {
-                val realX = origIndices[lastX]
-                rawResult.add(DiffItem(DiffType.DELETE, original[realX], originalIndex = realX))
-                lastX++
-            }
+        // Add suffix items
+        val suffixCount = n - 1 - endOrig
+        for (i in 0 until suffixCount) {
+            val realX = origIndices[endOrig + 1 + i]
+            val realY = revIndices[endRev + 1 + i]
+            rawResult.add(DiffItem(DiffType.EQUAL, original[realX], originalIndex = realX, revisedIndex = realY))
         }
 
-        // Handle lines omitted because of ignoreEmptyLines
-        val finalResult = ArrayList<DiffItem<String>>()
-        var origPtr = 0
-        var revPtr = 0
+        // Interleave ignored empty lines if requested (lines with ignored keywords remain excluded)
+        val finalResult = if (options.ignoreEmptyLines) {
+            val combined = ArrayList<DiffItem<String>>()
+            var origPtr = 0
+            var revPtr = 0
+            var rawIdx = 0
 
-        // Combine raw results and ignored blank lines in sequential order
-        var rawIdx = 0
-        while (origPtr < original.size || revPtr < revised.size) {
-            val nextRaw = if (rawIdx < rawResult.size) rawResult[rawIdx] else null
+            while (origPtr < original.size || revPtr < revised.size) {
+                val nextRaw = if (rawIdx < rawResult.size) rawResult[rawIdx] else null
 
-            if (nextRaw != null) {
-                val targetOrig = nextRaw.originalIndex
-                val targetRev = nextRaw.revisedIndex
+                if (nextRaw != null) {
+                    val targetOrig = nextRaw.originalIndex
+                    val targetRev = nextRaw.revisedIndex
 
-                val origBlanks = if (targetOrig != null && origPtr < targetOrig) (origPtr until targetOrig).toList() else emptyList()
-                val revBlanks = if (targetRev != null && revPtr < targetRev) (revPtr until targetRev).toList() else emptyList()
+                    while (targetOrig != null && origPtr < targetOrig) {
+                        if (original[origPtr].isBlank()) {
+                            combined.add(DiffItem(DiffType.EQUAL, original[origPtr], originalIndex = origPtr))
+                        }
+                        origPtr++
+                    }
+                    while (targetRev != null && revPtr < targetRev) {
+                        if (revised[revPtr].isBlank()) {
+                            combined.add(DiffItem(DiffType.EQUAL, revised[revPtr], revisedIndex = revPtr))
+                        }
+                        revPtr++
+                    }
 
-                val commonSize = minOf(origBlanks.size, revBlanks.size)
-                for (idx in 0 until commonSize) {
-                    finalResult.add(
-                        DiffItem(
-                            type = DiffType.EQUAL,
-                            value = original[origBlanks[idx]],
-                            originalIndex = origBlanks[idx],
-                            revisedIndex = revBlanks[idx]
-                        )
-                    )
+                    combined.add(nextRaw)
+                    if (targetOrig != null) origPtr = targetOrig + 1
+                    if (targetRev != null) revPtr = targetRev + 1
+                    rawIdx++
+                } else {
+                    while (origPtr < original.size) {
+                        if (original[origPtr].isBlank()) {
+                            combined.add(DiffItem(DiffType.EQUAL, original[origPtr], originalIndex = origPtr))
+                        }
+                        origPtr++
+                    }
+                    while (revPtr < revised.size) {
+                        if (revised[revPtr].isBlank()) {
+                            combined.add(DiffItem(DiffType.EQUAL, revised[revPtr], revisedIndex = revPtr))
+                        }
+                        revPtr++
+                    }
                 }
-                val leftoverType = if (options.ignoreEmptyLines) DiffType.EQUAL else DiffType.DELETE
-                for (idx in commonSize until origBlanks.size) {
-                    finalResult.add(
-                        DiffItem(
-                            type = leftoverType,
-                            value = original[origBlanks[idx]],
-                            originalIndex = origBlanks[idx],
-                            revisedIndex = null
-                        )
-                    )
-                }
-                val leftoverTypeRev = if (options.ignoreEmptyLines) DiffType.EQUAL else DiffType.INSERT
-                for (idx in commonSize until revBlanks.size) {
-                    finalResult.add(
-                        DiffItem(
-                            type = leftoverTypeRev,
-                            value = revised[revBlanks[idx]],
-                            originalIndex = null,
-                            revisedIndex = revBlanks[idx]
-                        )
-                    )
-                }
-
-                // Append the raw diff item
-                finalResult.add(nextRaw)
-                if (targetOrig != null) origPtr = targetOrig + 1
-                if (targetRev != null) revPtr = targetRev + 1
-                rawIdx++
-            } else {
-                // Drain any leftovers
-                val origBlanksLeft = (origPtr until original.size).toList()
-                val revBlanksLeft = (revPtr until revised.size).toList()
-                val commonLeftSize = minOf(origBlanksLeft.size, revBlanksLeft.size)
-                for (idx in 0 until commonLeftSize) {
-                    finalResult.add(
-                        DiffItem(
-                            type = DiffType.EQUAL,
-                            value = original[origBlanksLeft[idx]],
-                            originalIndex = origBlanksLeft[idx],
-                            revisedIndex = revBlanksLeft[idx]
-                        )
-                    )
-                }
-                val leftoverType = if (options.ignoreEmptyLines) DiffType.EQUAL else DiffType.DELETE
-                for (idx in commonLeftSize until origBlanksLeft.size) {
-                    finalResult.add(
-                        DiffItem(
-                            type = leftoverType,
-                            value = original[origBlanksLeft[idx]],
-                            originalIndex = origBlanksLeft[idx],
-                            revisedIndex = null
-                        )
-                    )
-                }
-                val leftoverTypeRev = if (options.ignoreEmptyLines) DiffType.EQUAL else DiffType.INSERT
-                for (idx in commonLeftSize until revBlanksLeft.size) {
-                    finalResult.add(
-                        DiffItem(
-                            type = leftoverTypeRev,
-                            value = revised[revBlanksLeft[idx]],
-                            originalIndex = null,
-                            revisedIndex = revBlanksLeft[idx]
-                        )
-                    )
-                }
-                origPtr = original.size
-                revPtr = revised.size
             }
+            combined
+        } else {
+            rawResult
         }
 
         // Post-process to merge matching Delete + Insert lines into MODIFIED status
