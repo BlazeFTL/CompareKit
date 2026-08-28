@@ -103,8 +103,16 @@ class CompareViewModel : ViewModel() {
     private val _lineWrapEnabled = MutableStateFlow(true)
     val lineWrapEnabled: StateFlow<Boolean> = _lineWrapEnabled.asStateFlow()
 
-    private val _lineHeightMultiplier = MutableStateFlow(1.40f)
+    private val _lineHeightMultiplier = MutableStateFlow(1.30f)
     val lineHeightMultiplier: StateFlow<Float> = _lineHeightMultiplier.asStateFlow()
+
+    private val _treeExpandedPaths = MutableStateFlow<Set<String>?>(null)
+    val treeExpandedPaths: StateFlow<Set<String>?> = _treeExpandedPaths.asStateFlow()
+    private var parentTreeExpandedPaths: Set<String>? = null
+
+    fun setTreeExpandedPaths(paths: Set<String>) {
+        _treeExpandedPaths.value = paths
+    }
 
     private val _activeFileSearchQuery = MutableStateFlow("")
     val activeFileSearchQuery: StateFlow<String> = _activeFileSearchQuery.asStateFlow()
@@ -222,7 +230,6 @@ class CompareViewModel : ViewModel() {
         _selectedDexClassDetail.value = classStatus
         if (classStatus != null) {
             _lineWrapEnabled.value = false
-            _lineHeightMultiplier.value = 0.80f
         }
     }
 
@@ -262,14 +269,15 @@ class CompareViewModel : ViewModel() {
 
     fun openDexVirtualComparison(dexRelativePath: String) {
         _lineWrapEnabled.value = false
-        _lineHeightMultiplier.value = 0.80f
         viewModelScope.launch {
             _isProcessing.value = true
             _compareProgress.value = 0.05f
             val cleanPath = dexRelativePath.removePrefix("/").replace('\\', '/')
             if (_activeDexVirtualPath.value == null) {
                 parentComparisonFileList = _fileList.value
+                parentTreeExpandedPaths = _treeExpandedPaths.value
             }
+            _treeExpandedPaths.value = emptySet()
             _activeDexVirtualPath.value = if (cleanPath.isNotEmpty()) cleanPath else "classes.dex"
 
             withContext(Dispatchers.IO) {
@@ -353,6 +361,14 @@ class CompareViewModel : ViewModel() {
                             srcCls != null && modCls != null -> {
                                 if (srcCls.signature == modCls.signature) {
                                     FileStatus.UNCHANGED
+                                } else if (_diffOptions.value.ignoredLineKeywords.isNotEmpty()) {
+                                    val srcText = srcCls.toTextRepresentation(opts)
+                                    val modText = modCls.toTextRepresentation(opts)
+                                    if (FileHelper.areContentsEqual(srcText.lines(), modText.lines(), _diffOptions.value)) {
+                                        FileStatus.UNCHANGED
+                                    } else {
+                                        FileStatus.MODIFIED
+                                    }
                                 } else {
                                     FileStatus.MODIFIED
                                 }
@@ -382,7 +398,7 @@ class CompareViewModel : ViewModel() {
 
                     _fileList.value = virtualSmaliList
                     _searchQuery.value = ""
-                    _statusFilter.value = null
+                    _statusFilter.value = FileStatus.MODIFIED
                     _compareProgress.value = 1.0f
                 } catch (e: Exception) {
                     _errorMessage.value = "Failed to parse DEX bytecode: ${e.localizedMessage}"
@@ -399,12 +415,16 @@ class CompareViewModel : ViewModel() {
             _fileList.value = parentComparisonFileList ?: emptyList()
             parentComparisonFileList = null
         }
+        if (parentTreeExpandedPaths != null) {
+            _treeExpandedPaths.value = parentTreeExpandedPaths
+            parentTreeExpandedPaths = null
+        }
         _activeDexVirtualPath.value = null
         _selectedFile.value = null
         _diffLines.value = emptyList()
         _searchQuery.value = ""
         _activeFileSearchQuery.value = ""
-        _statusFilter.value = null
+        _statusFilter.value = if (isComparingApkFiles() || isDecompiledApkComparison()) FileStatus.MODIFIED else null
         synchronized(virtualDexSourceClasses) { virtualDexSourceClasses.clear() }
         synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses.clear() }
         DexStorageManager.clearCache()
@@ -650,10 +670,22 @@ class CompareViewModel : ViewModel() {
     fun selectExplorerItemForTarget(item: File) {
         val target = _activePickerTarget.value
         if (target == PickerTarget.ORIGINAL) {
+            if (_sourceFile.value?.absolutePath != item.absolutePath) {
+                clearHiddenLineKeywords()
+                _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = emptyList())
+                _treeExpandedPaths.value = null
+                parentTreeExpandedPaths = null
+            }
             _sourceFile.value = item
             _sourceName.value = item.name
             _sourceIsZip.value = item.name.lowercase().let { it.endsWith(".zip") || it.endsWith(".apk") }
         } else if (target == PickerTarget.MODIFIED) {
+            if (_modifiedFile.value?.absolutePath != item.absolutePath) {
+                clearHiddenLineKeywords()
+                _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = emptyList())
+                _treeExpandedPaths.value = null
+                parentTreeExpandedPaths = null
+            }
             _modifiedFile.value = item
             _modifiedName.value = item.name
             _modifiedIsZip.value = item.name.lowercase().let { it.endsWith(".zip") || it.endsWith(".apk") }
@@ -689,7 +721,18 @@ class CompareViewModel : ViewModel() {
         _selectedFile.value = null
         _activeDexVirtualPath.value = null
         _selectedDexClassDetail.value = null
+        _treeExpandedPaths.value = null
+        parentTreeExpandedPaths = null
+        clearHiddenLineKeywords()
+        _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = emptyList())
         DexStorageManager.clearCache()
+    }
+
+    fun isComparingApkFiles(): Boolean {
+        val srcName = (_sourceName.value ?: _sourceFile.value?.name)?.lowercase() ?: ""
+        val modName = (_modifiedName.value ?: _modifiedFile.value?.name)?.lowercase() ?: ""
+        val apkExts = listOf(".apk", ".apks", ".xapk")
+        return apkExts.any { srcName.endsWith(it) } || apkExts.any { modName.endsWith(it) }
     }
 
     fun isDecompiledApkComparison(): Boolean {
@@ -888,6 +931,14 @@ class CompareViewModel : ViewModel() {
                     _fileList.value = comparison
                     _hasRunComparison.value = true
 
+                    val isApk = isComparingApkFiles() || isDecompiledApkComparison()
+                    if (isApk) {
+                        _statusFilter.value = FileStatus.MODIFIED
+                        _treeExpandedPaths.value = emptySet()
+                    } else {
+                        _statusFilter.value = null
+                    }
+
                     // Keep processing overlay active briefly so Compose mounts the diff screen before overlay fades out
                     kotlinx.coroutines.delay(100)
                 } else {
@@ -957,6 +1008,14 @@ class CompareViewModel : ViewModel() {
                     _modifiedDir.value = tempModDir
                     _fileList.value = comparison
                     _hasRunComparison.value = true
+
+                    val isApk = isComparingApkFiles() || isDecompiledApkComparison()
+                    if (isApk) {
+                        _statusFilter.value = FileStatus.MODIFIED
+                        _treeExpandedPaths.value = emptySet()
+                    } else {
+                        _statusFilter.value = null
+                    }
 
                     kotlinx.coroutines.delay(100)
                 }
@@ -1108,7 +1167,7 @@ class CompareViewModel : ViewModel() {
         } catch (e: Exception) {
             _appTheme.value = AppTheme.FOREST
         }
-        _lineHeightMultiplier.value = sharedPrefs?.getFloat("line_height_multiplier", 1.40f) ?: 1.40f
+        _lineHeightMultiplier.value = sharedPrefs?.getFloat("line_height_multiplier", 1.30f) ?: 1.30f
 
         val ignoreDebugInfo = sharedPrefs?.getBoolean("dex_ignore_debug_info", true) ?: true
         val ignoreCompilationOptimizations = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", true) ?: true
@@ -1126,8 +1185,8 @@ class CompareViewModel : ViewModel() {
 
         _focusModeEnabled.value = sharedPrefs?.getBoolean("focus_mode_enabled", false) ?: false
         _focusContextLines.value = sharedPrefs?.getInt("focus_context_lines", 20) ?: 20
-        val savedKeywords = sharedPrefs?.getStringSet("hidden_line_keywords", emptySet()) ?: emptySet()
-        _hiddenLineKeywords.value = savedKeywords.toList()
+        _hiddenLineKeywords.value = emptyList()
+        sharedPrefs?.edit()?.remove("hidden_line_keywords")?.apply()
     }
 
     fun setFocusModeEnabled(enabled: Boolean) {
@@ -1150,25 +1209,37 @@ class CompareViewModel : ViewModel() {
         if (trimmed.isNotEmpty() && !_hiddenLineKeywords.value.contains(trimmed)) {
             val updated = _hiddenLineKeywords.value + trimmed
             _hiddenLineKeywords.value = updated
-            sharedPrefs?.edit()?.putStringSet("hidden_line_keywords", updated.toSet())?.apply()
         }
     }
 
     fun removeHiddenLineKeyword(keyword: String) {
         val updated = _hiddenLineKeywords.value.filter { it != keyword }
         _hiddenLineKeywords.value = updated
-        sharedPrefs?.edit()?.putStringSet("hidden_line_keywords", updated.toSet())?.apply()
     }
 
     fun clearHiddenLineKeywords() {
         _hiddenLineKeywords.value = emptyList()
-        sharedPrefs?.edit()?.remove("hidden_line_keywords")?.apply()
     }
 
     fun setHiddenLineKeywords(keywords: List<String>) {
         val distinct = keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         _hiddenLineKeywords.value = distinct
-        sharedPrefs?.edit()?.putStringSet("hidden_line_keywords", distinct.toSet())?.apply()
+    }
+
+    fun redoDiffWithHiddenKeywords(context: Context? = null) {
+        val keywords = _hiddenLineKeywords.value
+        _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = keywords)
+
+        if (_activeDexVirtualPath.value != null) {
+            openDexVirtualComparison(_activeDexVirtualPath.value ?: "classes.dex")
+        } else if (context != null) {
+            performComparison(context)
+        } else {
+            runComparison()
+        }
+        _selectedFile.value?.let { fileStatus ->
+            loadDiffForFile(fileStatus)
+        }
     }
 
     fun setAppTheme(theme: AppTheme) {
@@ -1189,7 +1260,6 @@ class CompareViewModel : ViewModel() {
             val isSmaliOrDex = pathLower.endsWith(".smali") || pathLower.endsWith(".dex") || _activeDexVirtualPath.value != null
             if (isSmaliOrDex) {
                 _lineWrapEnabled.value = false
-                _lineHeightMultiplier.value = 0.80f
             }
             loadDiffForFile(fileStatus)
         } else {
@@ -1257,6 +1327,14 @@ class CompareViewModel : ViewModel() {
                                 srcCls != null && modCls != null -> {
                                     if (srcCls.signature == modCls.signature) {
                                         DexStatus.UNCHANGED
+                                    } else if (_diffOptions.value.ignoredLineKeywords.isNotEmpty()) {
+                                        val srcText = srcCls.toTextRepresentation(opts)
+                                        val modText = modCls.toTextRepresentation(opts)
+                                        if (FileHelper.areContentsEqual(srcText.lines(), modText.lines(), _diffOptions.value)) {
+                                            DexStatus.UNCHANGED
+                                        } else {
+                                            DexStatus.MODIFIED
+                                        }
                                     } else {
                                         DexStatus.MODIFIED
                                     }

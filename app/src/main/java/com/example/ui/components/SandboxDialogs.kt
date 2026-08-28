@@ -158,7 +158,7 @@ fun EditFileDialog(
 fun DiffSettingsDialog(
     options: DiffOptions,
     beautifierEnabled: Boolean,
-    lineHeightMultiplier: Float = 1.40f,
+    lineHeightMultiplier: Float = 1.30f,
     isDecompiledApk: Boolean = false,
     dexOptions: DexCompareOptions = DexCompareOptions(),
     onDismiss: () -> Unit,
@@ -446,7 +446,7 @@ fun DiffSettingsDialog(
                                         Triple("Ultra Dense", 0.60f, "Maximum code lines on screen, zero excess padding"),
                                         Triple("Dense", 0.80f, "Optimized default for Smali & DEX bytecode"),
                                         Triple("Compact", 1.10f, "Tight single-line spacing for source code"),
-                                        Triple("Normal", 1.40f, "Standard comfortable height"),
+                                        Triple("Normal", 1.30f, "Standard comfortable height (Default)"),
                                         Triple("Comfortable", 1.65f, "Spacious line padding for readability"),
                                         Triple("Spacious", 1.95f, "Generous room between code lines")
                                     )

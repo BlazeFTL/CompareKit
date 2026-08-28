@@ -50,6 +50,7 @@ import com.example.ui.components.CompareKitLogo
 import com.example.ui.components.CompareTreeView
 import com.example.ui.components.DecompiledApkOptionsDialog
 import com.example.ui.components.DiffSettingsDialog
+import com.example.ui.components.FocusAndFilterDialog
 import com.example.ui.components.ExplorerSortBottomSheet
 import com.example.ui.components.MinimapScrollbar
 import com.example.ui.viewmodel.CompareViewModel
@@ -103,6 +104,10 @@ fun CompareListScreen(
     val explorerSortMode by viewModel.explorerSortMode.collectAsState()
 
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showFocusFilterDialog by remember { mutableStateOf(false) }
+    val focusModeEnabled by viewModel.focusModeEnabled.collectAsState()
+    val focusContextLines by viewModel.focusContextLines.collectAsState()
+    val hiddenLineKeywords by viewModel.hiddenLineKeywords.collectAsState()
     var isSearchActive by rememberSaveable(searchQuery) { mutableStateOf(searchQuery.isNotEmpty()) }
     LaunchedEffect(searchQuery) {
         if (searchQuery.isNotEmpty()) {
@@ -322,6 +327,29 @@ fun CompareListScreen(
                                         imageVector = Icons.Outlined.Share,
                                         contentDescription = "Export Diff Results",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            // 2.5 Focus & Line Filters Action (Keyword hiding & Redo Diff)
+                            val isFilterActive = hiddenLineKeywords.isNotEmpty() || focusModeEnabled
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isFilterActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clickable { showFocusFilterDialog = true }
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFilterActive) Icons.Filled.CenterFocusStrong else Icons.Outlined.CenterFocusStrong,
+                                        contentDescription = "Focus & Line Filters",
+                                        tint = if (isFilterActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -1087,7 +1115,8 @@ fun CompareListScreen(
                                 }
                             }
 
-                            // Filter Pills Carousel (Only Modified, Added, Deleted, and Moved)
+                            // Filter Pills Carousel (All, Modified, Added, Deleted, and Moved)
+                            val allCount = remember(fileList) { fileList.count { it.status != FileStatus.UNCHANGED } }
                             val modifiedCount = remember(fileList) { fileList.count { it.status == FileStatus.MODIFIED } }
                             val addedCount = remember(fileList) { fileList.count { it.status == FileStatus.ADDED } }
                             val deletedCount = remember(fileList) { fileList.count { it.status == FileStatus.DELETED } }
@@ -1107,6 +1136,12 @@ fun CompareListScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    FilterChipPill(
+                                        label = "All",
+                                        count = allCount,
+                                        isSelected = statusFilter == null,
+                                        onClick = { viewModel.updateStatusFilter(null) }
+                                    )
                                     FilterChipPill(
                                         label = "Modified",
                                         count = modifiedCount,
@@ -1452,9 +1487,12 @@ fun CompareListScreen(
                                         .fillMaxWidth()
                                         .weight(1f)
                                 ) {
+                                    val treeExpandedPaths by viewModel.treeExpandedPaths.collectAsState()
                                     CompareTreeView(
                                         fileList = filteredList,
                                         isDexView = activeDexVirtualPath != null,
+                                        expandedPaths = treeExpandedPaths,
+                                        onExpandedPathsChange = { viewModel.setTreeExpandedPaths(it) },
                                         onCompareFile = { fileStatus ->
                                             if (fileStatus.relativePath.lowercase().endsWith(".dex")) {
                                                 viewModel.openDexVirtualComparison(fileStatus.relativePath)
@@ -1810,6 +1848,25 @@ fun CompareListScreen(
                 }
                 showSettingsDialog = false
             }
+        )
+    }
+
+    // FOCUS & FILTER DIALOG (Keyword Filtering & Redo Diff)
+    if (showFocusFilterDialog) {
+        FocusAndFilterDialog(
+            focusModeEnabled = focusModeEnabled,
+            focusContextLines = focusContextLines,
+            hiddenKeywords = hiddenLineKeywords,
+            onToggleFocusMode = { viewModel.setFocusModeEnabled(it) },
+            onSetFocusContextLines = { viewModel.setFocusContextLines(it) },
+            onAddHiddenKeyword = { viewModel.addHiddenLineKeyword(it) },
+            onRemoveHiddenKeyword = { viewModel.removeHiddenLineKeyword(it) },
+            onClearHiddenKeywords = { viewModel.clearHiddenLineKeywords() },
+            onRedoDiff = {
+                viewModel.redoDiffWithHiddenKeywords(context)
+                showFocusFilterDialog = false
+            },
+            onDismiss = { showFocusFilterDialog = false }
         )
     }
 

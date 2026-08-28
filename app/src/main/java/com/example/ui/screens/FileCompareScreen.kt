@@ -1391,6 +1391,10 @@ fun FileCompareScreen(
             onAddHiddenKeyword = { viewModel.addHiddenLineKeyword(it) },
             onRemoveHiddenKeyword = { viewModel.removeHiddenLineKeyword(it) },
             onClearHiddenKeywords = { viewModel.clearHiddenLineKeywords() },
+            onRedoDiff = {
+                viewModel.redoDiffWithHiddenKeywords(context)
+                showFocusFilterDialog = false
+            },
             onDismiss = { showFocusFilterDialog = false }
         )
     }

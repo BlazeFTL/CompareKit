@@ -21,7 +21,8 @@ data class SubRange(
 data class DiffOptions(
     val ignoreWhitespace: Boolean = false,
     val ignoreEmptyLines: Boolean = false,
-    val matchCase: Boolean = true
+    val matchCase: Boolean = true,
+    val ignoredLineKeywords: List<String> = emptyList()
 )
 
 object MyersDiff {
@@ -35,18 +36,24 @@ object MyersDiff {
         val processedOriginal = original.map { preprocess(it, options) }
         val processedRevised = revised.map { preprocess(it, options) }
 
-        val origIndices = original.indices.filter { !options.ignoreEmptyLines || original[it].isNotBlank() }
-        val revIndices = revised.indices.filter { !options.ignoreEmptyLines || revised[it].isNotBlank() }
+        val origIndices = original.indices.filter {
+            (!options.ignoreEmptyLines || original[it].isNotBlank()) &&
+            (options.ignoredLineKeywords.isEmpty() || !options.ignoredLineKeywords.any { kw -> original[it].contains(kw, ignoreCase = !options.matchCase) })
+        }
+        val revIndices = revised.indices.filter {
+            (!options.ignoreEmptyLines || revised[it].isNotBlank()) &&
+            (options.ignoredLineKeywords.isEmpty() || !options.ignoredLineKeywords.any { kw -> revised[it].contains(kw, ignoreCase = !options.matchCase) })
+        }
 
         val n = origIndices.size
         val m = revIndices.size
 
         if (n == 0 && m == 0) return emptyList()
         if (n == 0) {
-            return revised.mapIndexed { idx, v -> DiffItem(DiffType.INSERT, v, revisedIndex = idx) }
+            return revIndices.map { idx -> DiffItem(DiffType.INSERT, revised[idx], revisedIndex = idx) }
         }
         if (m == 0) {
-            return original.mapIndexed { idx, v -> DiffItem(DiffType.DELETE, v, originalIndex = idx) }
+            return origIndices.map { idx -> DiffItem(DiffType.DELETE, original[idx], originalIndex = idx) }
         }
 
         // Classic Myers Diff algorithm

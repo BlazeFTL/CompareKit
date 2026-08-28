@@ -42,6 +42,7 @@ fun FocusAndFilterDialog(
     onAddHiddenKeyword: (String) -> Unit,
     onRemoveHiddenKeyword: (String) -> Unit,
     onClearHiddenKeywords: () -> Unit,
+    onRedoDiff: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     var contextLinesText by remember(focusContextLines) { mutableStateOf(focusContextLines.toString()) }
@@ -576,6 +577,38 @@ fun FocusAndFilterDialog(
                                             }
                                         }
                                     }
+                                }
+
+                                if (onRedoDiff != null) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Button(
+                                        onClick = onRedoDiff,
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (hiddenKeywords.isNotEmpty()) "Redo Entire Diff With Ignored Keywords" else "Redo Entire Diff",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.5.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = if (hiddenKeywords.isNotEmpty()) {
+                                            "Re-runs diff completely ignoring lines matching these keywords. Files where all differences are hidden will no longer be marked as modified."
+                                        } else {
+                                            "Re-runs comparison diff with current options."
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                        lineHeight = 14.sp,
+                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                    )
                                 }
                             }
                         }

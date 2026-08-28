@@ -291,8 +291,13 @@ object FileHelper {
                             } else {
                                 val isBin = isBinaryExtension(path)
                                 if (path.lowercase().endsWith(".dex")) {
-                                    // Differing dex bytes: fast mark as MODIFIED for archive list
-                                    FileStatus.MODIFIED
+                                    val srcBytes = if (srcZip != null) srcZip.getInputStream(srcEntry).use { it.readBytes() } else ByteArray(0)
+                                    val modBytes = if (modZip != null) modZip.getInputStream(modEntry).use { it.readBytes() } else ByteArray(0)
+                                    if (DexParser.areDexFilesSemanticallyEqual(srcBytes, modBytes, dexOptions, options)) {
+                                        FileStatus.UNCHANGED
+                                    } else {
+                                        FileStatus.MODIFIED
+                                    }
                                 } else if (path.lowercase().endsWith(".xml")) {
                                     val srcBytes = if (srcZip != null) srcZip.getInputStream(srcEntry).use { it.readBytes() } else ByteArray(0)
                                     val modBytes = if (modZip != null) modZip.getInputStream(modEntry).use { it.readBytes() } else ByteArray(0)
@@ -480,7 +485,7 @@ object FileHelper {
                             if (path.lowercase().endsWith(".dex")) {
                                 if (areBinaryFilesEqual(srcFile, modFile)) {
                                     FileStatus.UNCHANGED
-                                } else if (DexParser.areDexFilesSemanticallyEqual(srcFile, modFile, dexOptions)) {
+                                } else if (DexParser.areDexFilesSemanticallyEqual(srcFile, modFile, dexOptions, options)) {
                                     FileStatus.UNCHANGED
                                 } else {
                                     FileStatus.MODIFIED
@@ -624,15 +629,36 @@ object FileHelper {
         }
     }
 
-    private fun areContentsEqual(
+    internal fun areContentsEqual(
         src: List<String>,
         mod: List<String>,
         options: DiffOptions
     ): Boolean {
-        if (src.size != mod.size) return false
-        for (i in src.indices) {
-            var sLine = src[i]
-            var mLine = mod[i]
+        var sFiltered = src
+        var mFiltered = mod
+
+        if (options.ignoredLineKeywords.isNotEmpty()) {
+            sFiltered = sFiltered.filter { line ->
+                !options.ignoredLineKeywords.any { kw ->
+                    line.contains(kw, ignoreCase = !options.matchCase)
+                }
+            }
+            mFiltered = mFiltered.filter { line ->
+                !options.ignoredLineKeywords.any { kw ->
+                    line.contains(kw, ignoreCase = !options.matchCase)
+                }
+            }
+        }
+
+        if (options.ignoreEmptyLines) {
+            sFiltered = sFiltered.filter { it.isNotBlank() }
+            mFiltered = mFiltered.filter { it.isNotBlank() }
+        }
+
+        if (sFiltered.size != mFiltered.size) return false
+        for (i in sFiltered.indices) {
+            var sLine = sFiltered[i]
+            var mLine = mFiltered[i]
             if (!options.matchCase) {
                 sLine = sLine.lowercase()
                 mLine = mLine.lowercase()

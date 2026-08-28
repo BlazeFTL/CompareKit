@@ -1948,18 +1948,28 @@ object DexParser {
         }
     }
 
-    fun areDexFilesSemanticallyEqual(file1: File, file2: File, options: DexCompareOptions = DexCompareOptions()): Boolean {
+    fun areDexFilesSemanticallyEqual(
+        file1: File,
+        file2: File,
+        options: DexCompareOptions = DexCompareOptions(),
+        diffOptions: com.example.diff.DiffOptions? = null
+    ): Boolean {
         if (!file1.exists() || !file2.exists()) return false
         if (file1.length() == 0L && file2.length() == 0L) return true
         if (file1.length() == file2.length() && FileHelper.areBinaryFilesEqual(file1, file2)) return true
         return try {
-            areDexFilesSemanticallyEqual(file1.readBytes(), file2.readBytes(), options)
+            areDexFilesSemanticallyEqual(file1.readBytes(), file2.readBytes(), options, diffOptions)
         } catch (e: Exception) {
             false
         }
     }
 
-    fun areDexFilesSemanticallyEqual(bytes1: ByteArray, bytes2: ByteArray, options: DexCompareOptions = DexCompareOptions()): Boolean {
+    fun areDexFilesSemanticallyEqual(
+        bytes1: ByteArray,
+        bytes2: ByteArray,
+        options: DexCompareOptions = DexCompareOptions(),
+        diffOptions: com.example.diff.DiffOptions? = null
+    ): Boolean {
         return try {
             if (bytes1.contentEquals(bytes2)) return true
             if (bytes1.size < 112 || bytes2.size < 112) return false
@@ -1978,7 +1988,17 @@ object DexParser {
             if (classes1.size != classes2.size) return false
             for ((className, cls1) in classes1) {
                 val cls2 = classes2[className] ?: return false
-                if (cls1.signature != cls2.signature) return false
+                if (cls1.signature != cls2.signature) {
+                    if (diffOptions != null && diffOptions.ignoredLineKeywords.isNotEmpty()) {
+                        val sLines = cls1.toTextRepresentation(options).lines()
+                        val mLines = cls2.toTextRepresentation(options).lines()
+                        if (!FileHelper.areContentsEqual(sLines, mLines, diffOptions)) {
+                            return false
+                        }
+                    } else {
+                        return false
+                    }
+                }
             }
             true
         } catch (e: Exception) {

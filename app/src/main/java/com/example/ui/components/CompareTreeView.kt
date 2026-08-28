@@ -228,6 +228,8 @@ object TreeHelper {
 fun CompareTreeView(
     fileList: List<FileCompareStatus>,
     isDexView: Boolean,
+    expandedPaths: Set<String>? = null,
+    onExpandedPathsChange: ((Set<String>) -> Unit)? = null,
     onCompareFile: (FileCompareStatus) -> Unit,
     modifier: Modifier = Modifier,
     lazyListState: LazyListState
@@ -236,21 +238,19 @@ fun CompareTreeView(
         TreeHelper.buildTree(fileList)
     }
 
-    val defaultExpanded = remember(rootFolder, fileList) {
-        val changes = TreeHelper.collectChangePaths(rootFolder)
-        if (changes.isNotEmpty()) {
-            changes
-        } else {
-            rootFolder.subFolders.map { it.fullPath }.toSet()
-        }
+    var localExpandedPaths by remember(rootFolder) {
+        mutableStateOf<Set<String>>(emptySet())
     }
 
-    var expandedPaths by remember(rootFolder) {
-        mutableStateOf(defaultExpanded)
+    val currentExpandedPaths = expandedPaths ?: localExpandedPaths
+
+    val updateExpanded: (Set<String>) -> Unit = { newPaths ->
+        localExpandedPaths = newPaths
+        onExpandedPathsChange?.invoke(newPaths)
     }
 
-    val flattenedRows = remember(rootFolder, expandedPaths) {
-        TreeHelper.flattenTree(rootFolder, expandedPaths)
+    val flattenedRows = remember(rootFolder, currentExpandedPaths) {
+        TreeHelper.flattenTree(rootFolder, currentExpandedPaths)
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -299,7 +299,7 @@ fun CompareTreeView(
                 ) {
                     FilledTonalButton(
                         onClick = {
-                            expandedPaths = TreeHelper.collectAllFolderPaths(rootFolder)
+                            updateExpanded(TreeHelper.collectAllFolderPaths(rootFolder))
                         },
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
@@ -312,7 +312,7 @@ fun CompareTreeView(
 
                     FilledTonalButton(
                         onClick = {
-                            expandedPaths = emptySet()
+                            updateExpanded(emptySet())
                         },
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
@@ -345,11 +345,12 @@ fun CompareTreeView(
                             depth = rowItem.depth,
                             isExpanded = rowItem.isExpanded,
                             onToggleExpand = {
-                                expandedPaths = if (rowItem.isExpanded) {
-                                    expandedPaths - rowItem.folder.fullPath
+                                val newSet = if (rowItem.isExpanded) {
+                                    currentExpandedPaths - rowItem.folder.fullPath
                                 } else {
-                                    expandedPaths + rowItem.folder.fullPath
+                                    currentExpandedPaths + rowItem.folder.fullPath
                                 }
+                                updateExpanded(newSet)
                             }
                         )
                     }
