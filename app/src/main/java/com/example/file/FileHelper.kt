@@ -7,6 +7,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.io.BufferedInputStream
@@ -14,6 +15,7 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -826,91 +828,148 @@ object FileHelper {
         val changedFiles = fileList.filter { it.status != FileStatus.UNCHANGED }
         if (changedFiles.isEmpty()) return false
 
+        // Pre-warm all DEX in-memory byte caches so thousands of classes don't re-read disk
+        virtualSourceClasses?.values?.mapNotNull { it.sourceFile }?.distinct()?.forEach { DexParser.getOrLoadDexBytes(it) }
+        virtualModifiedClasses?.values?.mapNotNull { it.sourceFile }?.distinct()?.forEach { DexParser.getOrLoadDexBytes(it) }
+
         val total = changedFiles.size
-        ZipOutputStream(BufferedOutputStream(outputStream)).use { zipOut ->
+        val copyBuffer = ByteArray(65536)
+
+        ZipOutputStream(BufferedOutputStream(outputStream, 65536)).use { zipOut ->
+            zipOut.setLevel(java.util.zip.Deflater.BEST_SPEED)
             val srcZip = if (srcZipFile?.exists() == true) ZipFile(srcZipFile) else null
             val modZip = if (modZipFile?.exists() == true) ZipFile(modZipFile) else null
 
+            fun copyStream(input: InputStream, output: OutputStream) {
+                var bytesRead: Int
+                while (input.read(copyBuffer).also { bytesRead = it } != -1) {
+                    output.write(copyBuffer, 0, bytesRead)
+                }
+            }
+
+            var lastProgressTime = 0L
+
             try {
-                for ((index, item) in changedFiles.withIndex()) {
-                    val progress = index.toFloat() / total
-                    onProgress(progress, "Archiving ${item.relativePath}...")
+                // If virtual DEX classes are present, process in parallel chunks across CPU cores
+                val chunkSize = if (virtualSourceClasses != null || virtualModifiedClasses != null) 64 else 1
+                val chunks = changedFiles.chunked(chunkSize)
+                var processedCount = 0
 
-                    val cleanPath = item.relativePath.removePrefix("/").replace('\\', '/')
-                    val origCleanPath = (item.originalPath ?: cleanPath).removePrefix("/").replace('\\', '/')
+                for (chunk in chunks) {
+                    val preparedChunk = if (virtualSourceClasses != null || virtualModifiedClasses != null) {
+                        runBlocking(Dispatchers.Default) {
+                            chunk.map { item ->
+                                async {
+                                    val cleanPath = item.relativePath.removePrefix("/").replace('\\', '/')
+                                    val origCleanPath = (item.originalPath ?: cleanPath).removePrefix("/").replace('\\', '/')
 
-                    // If modified, deleted, or moved, add Stock version
-                    if (item.status == FileStatus.MODIFIED || item.status == FileStatus.DELETED || item.status == FileStatus.MOVED) {
-                        if (virtualSourceClasses != null) {
-                            val className = origCleanPath.removeSuffix(".smali").replace('/', '.')
-                            val cls = virtualSourceClasses[className]
-                            if (cls != null) {
-                                val text = cls.toTextRepresentation(dexOptions)
-                                val outEntry = ZipEntry("Stock/$origCleanPath")
-                                zipOut.putNextEntry(outEntry)
-                                zipOut.write(text.toByteArray(Charsets.UTF_8))
-                                zipOut.closeEntry()
-                            }
-                        } else if (srcZip != null) {
-                            val entry = srcZip.getEntry(origCleanPath)
-                            if (entry != null) {
-                                val outEntry = ZipEntry("Stock/$origCleanPath")
-                                outEntry.time = entry.time
-                                zipOut.putNextEntry(outEntry)
-                                srcZip.getInputStream(entry).use { input ->
-                                    input.copyTo(zipOut, bufferSize = 8192)
+                                    var stockBytes: ByteArray? = null
+                                    if (item.status == FileStatus.MODIFIED || item.status == FileStatus.DELETED || item.status == FileStatus.MOVED) {
+                                        if (virtualSourceClasses != null) {
+                                            val className = origCleanPath.removeSuffix(".smali").replace('/', '.')
+                                            val cls = virtualSourceClasses[className]
+                                            if (cls != null) {
+                                                stockBytes = cls.toTextRepresentation(dexOptions).toByteArray(Charsets.UTF_8)
+                                            }
+                                        }
+                                    }
+
+                                    var modBytes: ByteArray? = null
+                                    if (item.status == FileStatus.MODIFIED || item.status == FileStatus.ADDED || item.status == FileStatus.MOVED) {
+                                        if (virtualModifiedClasses != null) {
+                                            val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+                                            val cls = virtualModifiedClasses[className]
+                                            if (cls != null) {
+                                                modBytes = cls.toTextRepresentation(dexOptions).toByteArray(Charsets.UTF_8)
+                                            }
+                                        }
+                                    }
+
+                                    Triple(item, stockBytes, modBytes)
                                 }
-                                zipOut.closeEntry()
-                            }
-                        } else if (srcDir != null) {
-                            val srcFile = File(srcDir, origCleanPath)
-                            if (srcFile.exists() && srcFile.isFile) {
-                                val entryName = "Stock/$origCleanPath"
-                                val entry = ZipEntry(entryName)
-                                entry.time = srcFile.lastModified()
-                                zipOut.putNextEntry(entry)
-                                srcFile.inputStream().use { input ->
-                                    input.copyTo(zipOut, bufferSize = 8192)
-                                }
-                                zipOut.closeEntry()
-                            }
+                            }.awaitAll()
                         }
+                    } else {
+                        chunk.map { Triple(it, null as ByteArray?, null as ByteArray?) }
                     }
 
-                    // If modified, added, or moved, add Mod version
-                    if (item.status == FileStatus.MODIFIED || item.status == FileStatus.ADDED || item.status == FileStatus.MOVED) {
-                        if (virtualModifiedClasses != null) {
-                            val className = cleanPath.removeSuffix(".smali").replace('/', '.')
-                            val cls = virtualModifiedClasses[className]
-                            if (cls != null) {
-                                val text = cls.toTextRepresentation(dexOptions)
-                                val outEntry = ZipEntry("Mod/$cleanPath")
+                    for ((item, stockSmaliBytes, modSmaliBytes) in preparedChunk) {
+                        processedCount++
+                        val now = System.currentTimeMillis()
+                        if (now - lastProgressTime > 120 || processedCount == total) {
+                            lastProgressTime = now
+                            val progress = processedCount.toFloat() / total
+                            onProgress(progress, "Archiving ($processedCount/$total): ${item.relativePath}")
+                        }
+
+                        val cleanPath = item.relativePath.removePrefix("/").replace('\\', '/')
+                        val origCleanPath = (item.originalPath ?: cleanPath).removePrefix("/").replace('\\', '/')
+
+                        // If modified, deleted, or moved, add Stock version
+                        if (item.status == FileStatus.MODIFIED || item.status == FileStatus.DELETED || item.status == FileStatus.MOVED) {
+                            if (stockSmaliBytes != null) {
+                                val outEntry = ZipEntry("Stock/$origCleanPath")
+                                outEntry.size = stockSmaliBytes.size.toLong()
                                 zipOut.putNextEntry(outEntry)
-                                zipOut.write(text.toByteArray(Charsets.UTF_8))
+                                zipOut.write(stockSmaliBytes)
                                 zipOut.closeEntry()
+                            } else if (srcZip != null) {
+                                val entry = srcZip.getEntry(origCleanPath)
+                                if (entry != null) {
+                                    val outEntry = ZipEntry("Stock/$origCleanPath")
+                                    outEntry.time = entry.time
+                                    zipOut.putNextEntry(outEntry)
+                                    srcZip.getInputStream(entry).use { input ->
+                                        copyStream(input, zipOut)
+                                    }
+                                    zipOut.closeEntry()
+                                }
+                            } else if (srcDir != null) {
+                                val srcFile = File(srcDir, origCleanPath)
+                                if (srcFile.exists() && srcFile.isFile) {
+                                    val entryName = "Stock/$origCleanPath"
+                                    val entry = ZipEntry(entryName)
+                                    entry.time = srcFile.lastModified()
+                                    zipOut.putNextEntry(entry)
+                                    srcFile.inputStream().use { input ->
+                                        copyStream(input, zipOut)
+                                    }
+                                    zipOut.closeEntry()
+                                }
                             }
-                        } else if (modZip != null) {
-                            val entry = modZip.getEntry(cleanPath)
-                            if (entry != null) {
+                        }
+
+                        // If modified, added, or moved, add Mod version
+                        if (item.status == FileStatus.MODIFIED || item.status == FileStatus.ADDED || item.status == FileStatus.MOVED) {
+                            if (modSmaliBytes != null) {
                                 val outEntry = ZipEntry("Mod/$cleanPath")
-                                outEntry.time = entry.time
+                                outEntry.size = modSmaliBytes.size.toLong()
                                 zipOut.putNextEntry(outEntry)
-                                modZip.getInputStream(entry).use { input ->
-                                    input.copyTo(zipOut, bufferSize = 8192)
-                                }
+                                zipOut.write(modSmaliBytes)
                                 zipOut.closeEntry()
-                            }
-                        } else if (modDir != null) {
-                            val modFile = File(modDir, cleanPath)
-                            if (modFile.exists() && modFile.isFile) {
-                                val entryName = "Mod/$cleanPath"
-                                val entry = ZipEntry(entryName)
-                                entry.time = modFile.lastModified()
-                                zipOut.putNextEntry(entry)
-                                modFile.inputStream().use { input ->
-                                    input.copyTo(zipOut, bufferSize = 8192)
+                            } else if (modZip != null) {
+                                val entry = modZip.getEntry(cleanPath)
+                                if (entry != null) {
+                                    val outEntry = ZipEntry("Mod/$cleanPath")
+                                    outEntry.time = entry.time
+                                    zipOut.putNextEntry(outEntry)
+                                    modZip.getInputStream(entry).use { input ->
+                                        copyStream(input, zipOut)
+                                    }
+                                    zipOut.closeEntry()
                                 }
-                                zipOut.closeEntry()
+                            } else if (modDir != null) {
+                                val modFile = File(modDir, cleanPath)
+                                if (modFile.exists() && modFile.isFile) {
+                                    val entryName = "Mod/$cleanPath"
+                                    val entry = ZipEntry(entryName)
+                                    entry.time = modFile.lastModified()
+                                    zipOut.putNextEntry(entry)
+                                    modFile.inputStream().use { input ->
+                                        copyStream(input, zipOut)
+                                    }
+                                    zipOut.closeEntry()
+                                }
                             }
                         }
                     }
@@ -937,10 +996,19 @@ object FileHelper {
     ): Boolean {
         val cleanPath = fileStatus.relativePath.removePrefix("/").replace('\\', '/')
         val origCleanPath = (fileStatus.originalPath ?: cleanPath).removePrefix("/").replace('\\', '/')
+        val copyBuffer = ByteArray(65536)
 
-        ZipOutputStream(BufferedOutputStream(outputStream)).use { zipOut ->
+        ZipOutputStream(BufferedOutputStream(outputStream, 65536)).use { zipOut ->
+            zipOut.setLevel(java.util.zip.Deflater.BEST_SPEED)
             val srcZip = if (srcZipFile?.exists() == true) ZipFile(srcZipFile) else null
             val modZip = if (modZipFile?.exists() == true) ZipFile(modZipFile) else null
+
+            fun copyStream(input: InputStream, output: OutputStream) {
+                var bytesRead: Int
+                while (input.read(copyBuffer).also { bytesRead = it } != -1) {
+                    output.write(copyBuffer, 0, bytesRead)
+                }
+            }
 
             try {
                 if (fileStatus.status == FileStatus.MODIFIED || fileStatus.status == FileStatus.DELETED || fileStatus.status == FileStatus.MOVED) {
@@ -949,9 +1017,11 @@ object FileHelper {
                         val cls = virtualSourceClasses[className]
                         if (cls != null) {
                             val text = cls.toTextRepresentation(dexOptions)
+                            val bytes = text.toByteArray(Charsets.UTF_8)
                             val outEntry = ZipEntry("Stock/$origCleanPath")
+                            outEntry.size = bytes.size.toLong()
                             zipOut.putNextEntry(outEntry)
-                            zipOut.write(text.toByteArray(Charsets.UTF_8))
+                            zipOut.write(bytes)
                             zipOut.closeEntry()
                         }
                     } else if (srcZip != null) {
@@ -961,7 +1031,7 @@ object FileHelper {
                             outEntry.time = entry.time
                             zipOut.putNextEntry(outEntry)
                             srcZip.getInputStream(entry).use { input ->
-                                input.copyTo(zipOut, bufferSize = 8192)
+                                copyStream(input, zipOut)
                             }
                             zipOut.closeEntry()
                         }
@@ -972,7 +1042,7 @@ object FileHelper {
                             entry.time = srcFile.lastModified()
                             zipOut.putNextEntry(entry)
                             srcFile.inputStream().use { input ->
-                                input.copyTo(zipOut, bufferSize = 8192)
+                                copyStream(input, zipOut)
                             }
                             zipOut.closeEntry()
                         }
@@ -984,9 +1054,11 @@ object FileHelper {
                         val cls = virtualModifiedClasses[className]
                         if (cls != null) {
                             val text = cls.toTextRepresentation(dexOptions)
+                            val bytes = text.toByteArray(Charsets.UTF_8)
                             val outEntry = ZipEntry("Mod/$cleanPath")
+                            outEntry.size = bytes.size.toLong()
                             zipOut.putNextEntry(outEntry)
-                            zipOut.write(text.toByteArray(Charsets.UTF_8))
+                            zipOut.write(bytes)
                             zipOut.closeEntry()
                         }
                     } else if (modZip != null) {
@@ -996,7 +1068,7 @@ object FileHelper {
                             outEntry.time = entry.time
                             zipOut.putNextEntry(outEntry)
                             modZip.getInputStream(entry).use { input ->
-                                input.copyTo(zipOut, bufferSize = 8192)
+                                copyStream(input, zipOut)
                             }
                             zipOut.closeEntry()
                         }
@@ -1007,7 +1079,7 @@ object FileHelper {
                             entry.time = modFile.lastModified()
                             zipOut.putNextEntry(entry)
                             modFile.inputStream().use { input ->
-                                input.copyTo(zipOut, bufferSize = 8192)
+                                copyStream(input, zipOut)
                             }
                             zipOut.closeEntry()
                         }

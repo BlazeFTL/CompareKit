@@ -1068,20 +1068,50 @@ object DexParser {
         }
     }
 
-    fun disassembleClassMethods(cls: DexClass, options: DexCompareOptions = DexCompareOptions()): List<DexMethodData> {
-        val bytes = cls.dexBytes ?: cls.sourceFile?.let { if (it.exists()) it.readBytes() else null } ?: return cls.methods
-        val buffer = DexBuffer(bytes)
-        val stringIdsSize = buffer.readUInt(56)
-        val stringIdsOff = buffer.readUInt(60)
-        val typeIdsSize = buffer.readUInt(64)
-        val typeIdsOff = buffer.readUInt(68)
-        val protoIdsOff = buffer.readUInt(76)
-        val fieldIdsSize = buffer.readUInt(80)
-        val fieldIdsOff = cls.fieldIdsOff
-        val methodIdsSize = buffer.readUInt(88)
-        val methodIdsOff = cls.methodIdsOff
+    private val dexFileBytesCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    private val dexContextCache = java.util.concurrent.ConcurrentHashMap<String, DexContext>()
 
+    /**
+     * Caches in-memory DEX bytes to prevent re-reading 10MB-30MB DEX files from disk
+     * for every single disassembled class during diff and export.
+     */
+    fun getOrLoadDexBytes(file: java.io.File): ByteArray? {
+        val path = file.absolutePath
+        dexFileBytesCache[path]?.let { return it }
+        if (!file.exists()) return null
+        return try {
+            val bytes = file.readBytes()
+            dexFileBytesCache[path] = bytes
+            bytes
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    fun clearDexFileBytesCache() {
+        dexFileBytesCache.clear()
+        dexContextCache.clear()
+    }
+
+    internal class DexContext(
+        val bytes: ByteArray,
+        val buffer: DexBuffer,
+        val stringIdsSize: Int,
+        val stringIdsOff: Int,
+        val typeIdsSize: Int,
+        val typeIdsOff: Int,
+        val protoIdsOff: Int,
+        val fieldIdsOff: Int,
+        val fieldIdsSize: Int,
+        val methodIdsOff: Int,
+        val methodIdsSize: Int
+    ) {
         val stringCache = arrayOfNulls<String>(stringIdsSize)
+        val typeCache = arrayOfNulls<String>(typeIdsSize)
+        val formattedTypeCache = arrayOfNulls<String>(typeIdsSize)
+        val fieldCache = arrayOfNulls<DexFieldData>(fieldIdsSize)
+        val methodCache = arrayOfNulls<DexMethodData>(methodIdsSize)
+
         fun resolveString(idx: Int): String {
             if (idx !in 0 until stringIdsSize) return ""
             var s = stringCache[idx]
@@ -1095,7 +1125,6 @@ object DexParser {
             return s
         }
 
-        val typeCache = arrayOfNulls<String>(typeIdsSize)
         fun resolveType(idx: Int): String {
             if (idx !in 0 until typeIdsSize) return ""
             var t = typeCache[idx]
@@ -1109,7 +1138,7 @@ object DexParser {
             return t
         }
 
-        fun formatDescriptor(desc: String): String {
+        private fun formatDescriptor(desc: String): String {
             if (desc.isEmpty()) return ""
             var arrayDepth = 0
             var curr = desc
@@ -1139,57 +1168,109 @@ object DexParser {
             return baseType
         }
 
-        fun resolveFormattedType(idx: Int): String = formatDescriptor(resolveType(idx))
+        fun resolveFormattedType(idx: Int): String {
+            if (idx !in 0 until typeIdsSize) return ""
+            var ft = formattedTypeCache[idx]
+            if (ft == null) {
+                ft = formatDescriptor(resolveType(idx))
+                formattedTypeCache[idx] = ft
+            }
+            return ft
+        }
 
         fun resolveField(fieldIdx: Int): DexFieldData {
             if (fieldIdx !in 0 until fieldIdsSize) return DexFieldData("unknown_field", "void", 0)
-            val typeIdx = buffer.readUShort(fieldIdsOff + fieldIdx * 8 + 2)
-            val nameIdx = buffer.readUInt(fieldIdsOff + fieldIdx * 8 + 4)
-            return DexFieldData(
-                name = resolveString(nameIdx),
-                typeName = resolveFormattedType(typeIdx),
-                accessFlags = 0
-            )
+            var f = fieldCache[fieldIdx]
+            if (f == null) {
+                val typeIdx = buffer.readUShort(fieldIdsOff + fieldIdx * 8 + 2)
+                val nameIdx = buffer.readUInt(fieldIdsOff + fieldIdx * 8 + 4)
+                f = DexFieldData(
+                    name = resolveString(nameIdx),
+                    typeName = resolveFormattedType(typeIdx),
+                    accessFlags = 0
+                )
+                fieldCache[fieldIdx] = f
+            }
+            return f
         }
 
         fun resolveMethod(methodIdx: Int): DexMethodData {
             if (methodIdx !in 0 until methodIdsSize) return DexMethodData("unknown_method", "() : void", 0, "")
-            val protoIdx = buffer.readUShort(methodIdsOff + methodIdx * 8 + 2)
-            val nameIdx = buffer.readUInt(methodIdsOff + methodIdx * 8 + 4)
-            val methodName = resolveString(nameIdx)
+            var m = methodCache[methodIdx]
+            if (m == null) {
+                val protoIdx = buffer.readUShort(methodIdsOff + methodIdx * 8 + 2)
+                val nameIdx = buffer.readUInt(methodIdsOff + methodIdx * 8 + 4)
+                val methodName = resolveString(nameIdx)
 
-            val returnTypeIdx = buffer.readUInt(protoIdsOff + protoIdx * 12 + 4)
-            val returnType = resolveFormattedType(returnTypeIdx.toInt())
+                val returnTypeIdx = buffer.readUInt(protoIdsOff + protoIdx * 12 + 4)
+                val returnType = resolveFormattedType(returnTypeIdx.toInt())
 
-            val paramsOff = buffer.readUInt(protoIdsOff + protoIdx * 12 + 8)
-            val params = mutableListOf<String>()
-            if (paramsOff != 0) {
-                val size = buffer.readUInt(paramsOff)
-                for (p in 0 until size) {
-                    val typeIdx = buffer.readUShort(paramsOff + 4 + p * 2)
-                    params.add(resolveFormattedType(typeIdx))
+                val paramsOff = buffer.readUInt(protoIdsOff + protoIdx * 12 + 8)
+                val params = mutableListOf<String>()
+                if (paramsOff != 0) {
+                    val size = buffer.readUInt(paramsOff)
+                    for (p in 0 until size) {
+                        val typeIdx = buffer.readUShort(paramsOff + 4 + p * 2)
+                        params.add(resolveFormattedType(typeIdx))
+                    }
                 }
+                m = DexMethodData(methodName, "(${params.joinToString(", ")}) : $returnType", 0, "")
+                methodCache[methodIdx] = m
             }
-            return DexMethodData(methodName, "(${params.joinToString(", ")}) : $returnType", 0, "")
+            return m
         }
+    }
+
+    private fun getOrCreateDexContext(cls: DexClass, bytes: ByteArray): DexContext {
+        val cacheKey = cls.sourceFile?.absolutePath ?: System.identityHashCode(bytes).toString()
+        return dexContextCache.computeIfAbsent(cacheKey) {
+            val buffer = DexBuffer(bytes)
+            val stringIdsSize = buffer.readUInt(56)
+            val stringIdsOff = buffer.readUInt(60)
+            val typeIdsSize = buffer.readUInt(64)
+            val typeIdsOff = buffer.readUInt(68)
+            val protoIdsOff = buffer.readUInt(76)
+            val fieldIdsSize = buffer.readUInt(80)
+            val fieldIdsOff = if (cls.fieldIdsOff != 0) cls.fieldIdsOff else buffer.readUInt(84)
+            val methodIdsSize = buffer.readUInt(88)
+            val methodIdsOff = if (cls.methodIdsOff != 0) cls.methodIdsOff else buffer.readUInt(92)
+            DexContext(
+                bytes = bytes,
+                buffer = buffer,
+                stringIdsSize = stringIdsSize,
+                stringIdsOff = stringIdsOff,
+                typeIdsSize = typeIdsSize,
+                typeIdsOff = typeIdsOff,
+                protoIdsOff = protoIdsOff,
+                fieldIdsOff = fieldIdsOff,
+                fieldIdsSize = fieldIdsSize,
+                methodIdsOff = methodIdsOff,
+                methodIdsSize = methodIdsSize
+            )
+        }
+    }
+
+    fun disassembleClassMethods(cls: DexClass, options: DexCompareOptions = DexCompareOptions()): List<DexMethodData> {
+        val bytes = cls.dexBytes ?: cls.sourceFile?.let { getOrLoadDexBytes(it) } ?: return cls.methods
+        val ctx = getOrCreateDexContext(cls, bytes)
 
         return cls.methods.map { m ->
             if (m.codeOff != 0) {
                 val paramTypes = parseParamTypesFromSignature(m.signature)
                 val insns = disassembleMethod(
-                    buffer = buffer,
+                    buffer = ctx.buffer,
                     bytes = bytes,
                     codeOff = m.codeOff,
                     mAccessFlags = m.accessFlags,
                     paramTypes = paramTypes,
-                    resolveString = ::resolveString,
-                    resolveType = ::resolveType,
-                    resolveField = ::resolveField,
-                    resolveMethod = ::resolveMethod,
-                    fieldIdsOff = fieldIdsOff,
-                    fieldIdsSize = fieldIdsSize,
-                    methodIdsOff = methodIdsOff,
-                    methodIdsSize = methodIdsSize,
+                    resolveString = ctx::resolveString,
+                    resolveType = ctx::resolveType,
+                    resolveField = ctx::resolveField,
+                    resolveMethod = ctx::resolveMethod,
+                    fieldIdsOff = ctx.fieldIdsOff,
+                    fieldIdsSize = ctx.fieldIdsSize,
+                    methodIdsOff = ctx.methodIdsOff,
+                    methodIdsSize = ctx.methodIdsSize,
                     options = options
                 )
                 m.copy(instructions = insns)
@@ -1668,7 +1749,7 @@ object DexParser {
                                 if (c > 127) c -= 256
                                 "$name ${formatReg(a)}, ${formatReg(b)}, ${formatLiteralInt(c)}"
                             }
-                            else -> "$name ${formatReg((insn ushr 8) and 0xFF)}, $insn2"
+                            else -> "$name ${formatReg((insn ushr 8) and 0xFF)}, ${formatLiteralInt(insn2)}"
                         }
                     }
                     3 -> {
@@ -1775,7 +1856,7 @@ object DexParser {
                                     "$name {$args}, method@$methIdx"
                                 }
                             }
-                            else -> "$name ${formatReg((insn ushr 8) and 0xFF)}, $insn2, $insn3"
+                            else -> "$name ${formatReg((insn ushr 8) and 0xFF)}, ${formatLiteralInt(insn2)}, ${formatLiteralInt(insn3)}"
                         }
                     }
                     5 -> {

@@ -31,22 +31,20 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FocusAndFilterDialog(
     focusModeEnabled: Boolean,
     focusContextLines: Int,
-    hiddenKeywords: List<String>,
+    hiddenKeywords: List<String> = emptyList(),
     onToggleFocusMode: (Boolean) -> Unit,
     onSetFocusContextLines: (Int) -> Unit,
-    onAddHiddenKeyword: (String) -> Unit,
-    onRemoveHiddenKeyword: (String) -> Unit,
-    onClearHiddenKeywords: () -> Unit,
+    onAddHiddenKeyword: ((String) -> Unit)? = null,
+    onRemoveHiddenKeyword: ((String) -> Unit)? = null,
+    onClearHiddenKeywords: (() -> Unit)? = null,
     onRedoDiff: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     var contextLinesText by remember(focusContextLines) { mutableStateOf(focusContextLines.toString()) }
-    var newKeywordText by remember { mutableStateOf("") }
     val scrollState = rememberScrollState()
 
     Dialog(
@@ -110,14 +108,14 @@ fun FocusAndFilterDialog(
                             }
                             Column {
                                 Text(
-                                    text = "Focus & Line Filters",
+                                    text = "Focus Mode Settings",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 17.5.sp
                                 )
                                 Text(
-                                    text = "Context window & keyword line hiding",
+                                    text = "Context window around changed diff blocks",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp
@@ -364,254 +362,6 @@ fun FocusAndFilterDialog(
                                 }
                             }
                         }
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 2.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                        )
-
-                        // SECTION 2: HIDE LINES BY KEYWORD
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "HIDE LINES BY KEYWORD",
-                                style = TextStyle(
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.1.sp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            )
-
-                            if (hiddenKeywords.isNotEmpty()) {
-                                Text(
-                                    text = "Clear All",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier
-                                        .clickable { onClearHiddenKeywords() }
-                                        .padding(4.dp)
-                                )
-                            }
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Text(
-                                    text = "Hides every line inside the diff containing specific words or phrases (e.g. \"AdShow\", \"Log.d\").",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 12.sp
-                                )
-
-                                // Keyword Input Bar
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    OutlinedTextField(
-                                        value = newKeywordText,
-                                        onValueChange = { newKeywordText = it },
-                                        placeholder = { Text("e.g. AdShow, Log.d, debug...", fontSize = 13.sp) },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Outlined.Search,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(18.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        },
-                                        trailingIcon = {
-                                            if (newKeywordText.isNotEmpty()) {
-                                                IconButton(onClick = { newKeywordText = "" }) {
-                                                    Icon(Icons.Default.Clear, contentDescription = "Clear", modifier = Modifier.size(16.dp))
-                                                }
-                                            }
-                                        },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                        keyboardActions = KeyboardActions(
-                                            onDone = {
-                                                if (newKeywordText.isNotBlank()) {
-                                                    onAddHiddenKeyword(newKeywordText.trim())
-                                                    newKeywordText = ""
-                                                }
-                                            }
-                                        ),
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.weight(1f),
-                                        textStyle = TextStyle(
-                                            fontSize = 13.5.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    )
-
-                                    Button(
-                                        onClick = {
-                                            if (newKeywordText.isNotBlank()) {
-                                                onAddHiddenKeyword(newKeywordText.trim())
-                                                newKeywordText = ""
-                                            }
-                                        },
-                                        enabled = newKeywordText.isNotBlank(),
-                                        shape = RoundedCornerShape(12.dp),
-                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
-                                    ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Add", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    }
-                                }
-
-                                // Quick Suggestions Row
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "Quick:",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 11.sp
-                                    )
-
-                                    val quickExamples = listOf("AdShow", "Log.", "System.out", "analytics")
-                                    quickExamples.forEach { sample ->
-                                        val isAdded = hiddenKeywords.contains(sample)
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = if (isAdded) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
-                                            border = BorderStroke(
-                                                0.5.dp,
-                                                if (isAdded) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                            ),
-                                            modifier = Modifier.clickable {
-                                                if (!isAdded) {
-                                                    onAddHiddenKeyword(sample)
-                                                }
-                                            }
-                                        ) {
-                                            Text(
-                                                text = "+ $sample",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Active Filter Chips
-                                if (hiddenKeywords.isEmpty()) {
-                                    Text(
-                                        text = "No lines hidden currently.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                        fontSize = 12.sp,
-                                        modifier = Modifier.padding(vertical = 4.dp)
-                                    )
-                                } else {
-                                    FlowRow(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        hiddenKeywords.forEach { kw ->
-                                            Surface(
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = MaterialTheme.colorScheme.surface,
-                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f))
-                                            ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    modifier = Modifier.padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.VisibilityOff,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(13.dp)
-                                                    )
-                                                    Text(
-                                                        text = kw,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        fontFamily = FontFamily.Monospace,
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.widthIn(max = 180.dp)
-                                                    )
-                                                    IconButton(
-                                                        onClick = { onRemoveHiddenKeyword(kw) },
-                                                        modifier = Modifier.size(22.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.Close,
-                                                            contentDescription = "Remove",
-                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            modifier = Modifier.size(13.dp)
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if (onRedoDiff != null) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Button(
-                                        onClick = onRedoDiff,
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = if (hiddenKeywords.isNotEmpty()) "Redo Entire Diff With Ignored Keywords" else "Redo Entire Diff",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.5.sp
-                                        )
-                                    }
-                                    Text(
-                                        text = if (hiddenKeywords.isNotEmpty()) {
-                                            "Re-runs diff completely ignoring lines matching these keywords. Files where all differences are hidden will no longer be marked as modified."
-                                        } else {
-                                            "Re-runs comparison diff with current options."
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                        lineHeight = 14.sp,
-                                        modifier = Modifier.padding(horizontal = 4.dp)
-                                    )
-                                }
-                            }
-                        }
                     }
 
                     HorizontalDivider(
@@ -629,13 +379,12 @@ fun FocusAndFilterDialog(
                             onClick = {
                                 onToggleFocusMode(false)
                                 onSetFocusContextLines(20)
-                                onClearHiddenKeywords()
                             },
                             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Reset All", fontWeight = FontWeight.Medium)
+                            Text("Reset", fontWeight = FontWeight.Medium)
                         }
 
                         Button(

@@ -1212,99 +1212,13 @@ class CompareViewModel : ViewModel() {
         sharedPrefs?.edit()?.putInt("focus_context_lines", clamped)?.apply()
     }
 
-    fun addHiddenLineKeyword(keyword: String) {
-        val trimmed = keyword.trim()
-        if (trimmed.isNotEmpty() && !_hiddenLineKeywords.value.contains(trimmed)) {
-            val updated = _hiddenLineKeywords.value + trimmed
-            _hiddenLineKeywords.value = updated
-        }
-    }
-
-    fun removeHiddenLineKeyword(keyword: String) {
-        val updated = _hiddenLineKeywords.value.filter { it != keyword }
-        _hiddenLineKeywords.value = updated
-    }
-
+    fun addHiddenLineKeyword(keyword: String) {}
+    fun removeHiddenLineKeyword(keyword: String) {}
     fun clearHiddenLineKeywords() {
         _hiddenLineKeywords.value = emptyList()
     }
-
     fun setHiddenLineKeywords(keywords: List<String>) {
-        val distinct = keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-        _hiddenLineKeywords.value = distinct
-    }
-
-    fun redoDiffWithHiddenKeywords(context: Context? = null) {
-        val keywords = _hiddenLineKeywords.value
-        _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = keywords)
-
-        val currentFile = _selectedFile.value
-        if (currentFile != null) {
-            // Recalculate only the currently open file to prevent high memory usage and avoid full background re-comparison
-            loadDiffForFile(currentFile)
-            return
-        }
-
-        if (_activeDexVirtualPath.value != null) {
-            // Re-evaluate in-memory virtual classes without reloading DEX files from disk
-            refreshDexVirtualClassesWithKeywords()
-        } else if (context != null) {
-            performComparison(context)
-        } else {
-            runComparison()
-        }
-    }
-
-    private fun refreshDexVirtualClassesWithKeywords() {
-        viewModelScope.launch(Dispatchers.IO) {
-            _isProcessing.value = true
-            _compareProgress.value = 0.5f
-            try {
-                val opts = _dexCompareOptions.value
-                val diffOpts = _diffOptions.value
-                val currentList = _fileList.value
-                if (currentList.isEmpty()) return@launch
-
-                val updatedList = currentList.map { item ->
-                    val className = item.relativePath.removePrefix("/").removeSuffix(".smali").replace('/', '.')
-                    val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
-                    val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
-
-                    val newStatus = when {
-                        srcCls != null && modCls != null -> {
-                            if (srcCls.signature == modCls.signature) {
-                                FileStatus.UNCHANGED
-                            } else if (diffOpts.ignoredLineKeywords.isNotEmpty()) {
-                                try {
-                                    val srcText = srcCls.toTextRepresentation(opts)
-                                    val modText = modCls.toTextRepresentation(opts)
-                                    if (FileHelper.areStringLinesEqual(srcText, modText, diffOpts)) {
-                                        FileStatus.UNCHANGED
-                                    } else {
-                                        FileStatus.MODIFIED
-                                    }
-                                } catch (e: Throwable) {
-                                    FileStatus.MODIFIED
-                                }
-                            } else {
-                                FileStatus.MODIFIED
-                            }
-                        }
-                        srcCls != null -> FileStatus.DELETED
-                        modCls != null -> FileStatus.ADDED
-                        else -> item.status
-                    }
-                    if (newStatus != item.status) item.copy(status = newStatus) else item
-                }
-                _fileList.value = updatedList
-            } catch (e: Throwable) {
-                // Ignore safely
-            } finally {
-                _compareProgress.value = null
-                _isProcessing.value = false
-                System.gc()
-            }
-        }
+        _hiddenLineKeywords.value = emptyList()
     }
 
     fun setAppTheme(theme: AppTheme) {
@@ -1650,6 +1564,16 @@ class CompareViewModel : ViewModel() {
         val modTitle = _modifiedFile.value?.name ?: _modifiedDir.value?.name ?: "Modified"
         val isVirtualDex = _activeDexVirtualPath.value != null
 
+        // Pre-warm DEX in-memory byte cache so thousands of classes don't re-read disk
+        if (isVirtualDex) {
+            synchronized(virtualDexSourceClasses) {
+                virtualDexSourceClasses.values.mapNotNull { it.sourceFile }.distinct().forEach { DexParser.getOrLoadDexBytes(it) }
+            }
+            synchronized(virtualDexModifiedClasses) {
+                virtualDexModifiedClasses.values.mapNotNull { it.sourceFile }.distinct().forEach { DexParser.getOrLoadDexBytes(it) }
+            }
+        }
+
         // Write header immediately so file on disk is populated instantly
         if (!formatAsTxt) {
             writer.write("# CompareKit Diff Output\n")
@@ -1669,9 +1593,15 @@ class CompareViewModel : ViewModel() {
         }
 
         var changedCount = 0
+        var lastProgressTime = 0L
+
         for ((index, fileStatus) in changedList.withIndex()) {
-            val progressVal = (index + 1).toFloat() / total
-            onProgress(progressVal, "Exporting (${index + 1}/$total): ${fileStatus.relativePath}")
+            val now = System.currentTimeMillis()
+            if (now - lastProgressTime > 120 || index == total - 1) {
+                lastProgressTime = now
+                val progressVal = (index + 1).toFloat() / total
+                onProgress(progressVal, "Exporting (${index + 1}/$total): ${fileStatus.relativePath}")
+            }
 
             if (fileStatus.status == FileStatus.UNCHANGED) continue
             changedCount++
@@ -1689,13 +1619,115 @@ class CompareViewModel : ViewModel() {
                     writer.write("Binary files differ.\n\n")
                     writer.write("===================================================================\n\n")
                 }
-                writer.flush()
+                if ((index + 1) % 100 == 0 || index == total - 1) {
+                    writer.flush()
+                }
                 continue
             }
 
             val cleanPath = fileStatus.relativePath.removePrefix("/")
             val origCleanPath = (fileStatus.originalPath ?: fileStatus.relativePath).removePrefix("/")
 
+            // Fast-path for DELETED files (common when stripping SDKs)
+            if (fileStatus.status == FileStatus.DELETED) {
+                val srcLines = if (isVirtualDex) {
+                    val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+                    val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
+                    val opts = _dexCompareOptions.value
+                    val srcSmali = srcCls?.toTextRepresentation(opts) ?: ""
+                    var lines = if (srcSmali.isNotEmpty()) srcSmali.lines() else emptyList()
+                    DexParser.preprocessSmali(lines, opts)
+                } else {
+                    val srcBytes = getFileBytes(isSource = true, origCleanPath) ?: ByteArray(0)
+                    if (srcBytes.isNotEmpty()) {
+                        if (origCleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(srcBytes)) {
+                            AxmlDecoder.decode(srcBytes).lines()
+                        } else {
+                            String(srcBytes, Charsets.UTF_8).lines()
+                        }
+                    } else emptyList()
+                }
+
+                if (!formatAsTxt) {
+                    writer.write("--- a/${fileStatus.relativePath}\n")
+                    writer.write("+++ /dev/null\n")
+                    writer.write("@@ -1,${srcLines.size} +0,0 @@\n")
+                    for (line in srcLines) {
+                        writer.write("-")
+                        writer.write(line)
+                        writer.write("\n")
+                    }
+                    writer.write("\n")
+                } else {
+                    writer.write("FILE: ${fileStatus.relativePath}\n")
+                    writer.write("STATUS: DELETED\n")
+                    if (fileStatus.originalPath != null) {
+                        writer.write("ORIGINAL PATH: ${fileStatus.originalPath}\n")
+                    }
+                    writer.write("--- Stock Lines (${srcLines.size} lines) ---\n")
+                    for (line in srcLines) {
+                        writer.write("- ")
+                        writer.write(line)
+                        writer.write("\n")
+                    }
+                    writer.write("===================================================================\n\n")
+                }
+
+                if ((index + 1) % 100 == 0 || index == total - 1) {
+                    writer.flush()
+                }
+                continue
+            }
+
+            // Fast-path for ADDED files
+            if (fileStatus.status == FileStatus.ADDED) {
+                val modLines = if (isVirtualDex) {
+                    val className = cleanPath.removeSuffix(".smali").replace('/', '.')
+                    val modCls = synchronized(virtualDexModifiedClasses) { virtualDexModifiedClasses[className] }
+                    val opts = _dexCompareOptions.value
+                    val modSmali = modCls?.toTextRepresentation(opts) ?: ""
+                    var lines = if (modSmali.isNotEmpty()) modSmali.lines() else emptyList()
+                    DexParser.preprocessSmali(lines, opts)
+                } else {
+                    val modBytes = getFileBytes(isSource = false, cleanPath) ?: ByteArray(0)
+                    if (modBytes.isNotEmpty()) {
+                        if (cleanPath.lowercase().endsWith(".xml") && AxmlDecoder.isBinaryXml(modBytes)) {
+                            AxmlDecoder.decode(modBytes).lines()
+                        } else {
+                            String(modBytes, Charsets.UTF_8).lines()
+                        }
+                    } else emptyList()
+                }
+
+                if (!formatAsTxt) {
+                    writer.write("--- /dev/null\n")
+                    writer.write("+++ b/${fileStatus.relativePath}\n")
+                    writer.write("@@ -0,0 +1,${modLines.size} @@\n")
+                    for (line in modLines) {
+                        writer.write("+")
+                        writer.write(line)
+                        writer.write("\n")
+                    }
+                    writer.write("\n")
+                } else {
+                    writer.write("FILE: ${fileStatus.relativePath}\n")
+                    writer.write("STATUS: ADDED\n")
+                    writer.write("+++ Mod Lines (${modLines.size} lines) ---\n")
+                    for (line in modLines) {
+                        writer.write("+ ")
+                        writer.write(line)
+                        writer.write("\n")
+                    }
+                    writer.write("===================================================================\n\n")
+                }
+
+                if ((index + 1) % 100 == 0 || index == total - 1) {
+                    writer.flush()
+                }
+                continue
+            }
+
+            // For MODIFIED or MOVED files: run MyersDiff
             val diff = if (isVirtualDex) {
                 val className = cleanPath.removeSuffix(".smali").replace('/', '.')
                 val srcCls = synchronized(virtualDexSourceClasses) { virtualDexSourceClasses[className] }
@@ -1767,7 +1799,10 @@ class CompareViewModel : ViewModel() {
                 }
                 writer.write("===================================================================\n\n")
             }
-            writer.flush()
+
+            if ((index + 1) % 100 == 0 || index == total - 1) {
+                writer.flush()
+            }
         }
 
         if (changedCount == 0) {

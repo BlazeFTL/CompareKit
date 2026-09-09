@@ -1851,21 +1851,13 @@ fun CompareListScreen(
         )
     }
 
-    // FOCUS & FILTER DIALOG (Keyword Filtering & Redo Diff)
+    // FOCUS MODE DIALOG
     if (showFocusFilterDialog) {
         FocusAndFilterDialog(
             focusModeEnabled = focusModeEnabled,
             focusContextLines = focusContextLines,
-            hiddenKeywords = hiddenLineKeywords,
             onToggleFocusMode = { viewModel.setFocusModeEnabled(it) },
             onSetFocusContextLines = { viewModel.setFocusContextLines(it) },
-            onAddHiddenKeyword = { viewModel.addHiddenLineKeyword(it) },
-            onRemoveHiddenKeyword = { viewModel.removeHiddenLineKeyword(it) },
-            onClearHiddenKeywords = { viewModel.clearHiddenLineKeywords() },
-            onRedoDiff = {
-                viewModel.redoDiffWithHiddenKeywords(context)
-                showFocusFilterDialog = false
-            },
             onDismiss = { showFocusFilterDialog = false }
         )
     }
