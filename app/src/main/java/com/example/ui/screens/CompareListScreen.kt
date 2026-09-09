@@ -1856,8 +1856,12 @@ fun CompareListScreen(
         FocusAndFilterDialog(
             focusModeEnabled = focusModeEnabled,
             focusContextLines = focusContextLines,
+            hiddenKeywords = hiddenLineKeywords,
             onToggleFocusMode = { viewModel.setFocusModeEnabled(it) },
             onSetFocusContextLines = { viewModel.setFocusContextLines(it) },
+            onAddHiddenKeyword = { viewModel.addHiddenLineKeyword(it) },
+            onRemoveHiddenKeyword = { viewModel.removeHiddenLineKeyword(it) },
+            onClearHiddenKeywords = { viewModel.clearHiddenLineKeywords() },
             onDismiss = { showFocusFilterDialog = false }
         )
     }

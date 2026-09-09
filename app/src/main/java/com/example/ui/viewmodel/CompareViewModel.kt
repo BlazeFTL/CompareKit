@@ -679,8 +679,6 @@ class CompareViewModel : ViewModel() {
         val target = _activePickerTarget.value
         if (target == PickerTarget.ORIGINAL) {
             if (_sourceFile.value?.absolutePath != item.absolutePath) {
-                clearHiddenLineKeywords()
-                _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = emptyList())
                 _treeExpandedPaths.value = null
                 parentTreeExpandedPaths = null
             }
@@ -689,8 +687,6 @@ class CompareViewModel : ViewModel() {
             _sourceIsZip.value = item.name.lowercase().let { it.endsWith(".zip") || it.endsWith(".apk") }
         } else if (target == PickerTarget.MODIFIED) {
             if (_modifiedFile.value?.absolutePath != item.absolutePath) {
-                clearHiddenLineKeywords()
-                _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = emptyList())
                 _treeExpandedPaths.value = null
                 parentTreeExpandedPaths = null
             }
@@ -1193,8 +1189,11 @@ class CompareViewModel : ViewModel() {
 
         _focusModeEnabled.value = sharedPrefs?.getBoolean("focus_mode_enabled", false) ?: false
         _focusContextLines.value = sharedPrefs?.getInt("focus_context_lines", 20) ?: 20
-        _hiddenLineKeywords.value = emptyList()
-        sharedPrefs?.edit()?.remove("hidden_line_keywords")?.apply()
+        val savedKeywords = sharedPrefs?.getStringSet("hidden_line_keywords", emptySet())?.toList() ?: emptyList()
+        _hiddenLineKeywords.value = savedKeywords
+        if (savedKeywords.isNotEmpty()) {
+            _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = savedKeywords)
+        }
     }
 
     fun setFocusModeEnabled(enabled: Boolean) {
@@ -1212,13 +1211,42 @@ class CompareViewModel : ViewModel() {
         sharedPrefs?.edit()?.putInt("focus_context_lines", clamped)?.apply()
     }
 
-    fun addHiddenLineKeyword(keyword: String) {}
-    fun removeHiddenLineKeyword(keyword: String) {}
+    fun addHiddenLineKeyword(keyword: String) {
+        val trimmed = keyword.trim()
+        if (trimmed.isEmpty()) return
+        if (!_hiddenLineKeywords.value.contains(trimmed)) {
+            val updated = _hiddenLineKeywords.value + trimmed
+            _hiddenLineKeywords.value = updated
+            _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = updated)
+            sharedPrefs?.edit()?.putStringSet("hidden_line_keywords", updated.toSet())?.apply()
+            _selectedFile.value?.let { loadDiffForFile(it) }
+        }
+    }
+
+    fun removeHiddenLineKeyword(keyword: String) {
+        val trimmed = keyword.trim()
+        if (_hiddenLineKeywords.value.contains(trimmed)) {
+            val updated = _hiddenLineKeywords.value - trimmed
+            _hiddenLineKeywords.value = updated
+            _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = updated)
+            sharedPrefs?.edit()?.putStringSet("hidden_line_keywords", updated.toSet())?.apply()
+            _selectedFile.value?.let { loadDiffForFile(it) }
+        }
+    }
+
     fun clearHiddenLineKeywords() {
         _hiddenLineKeywords.value = emptyList()
+        _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = emptyList())
+        sharedPrefs?.edit()?.remove("hidden_line_keywords")?.apply()
+        _selectedFile.value?.let { loadDiffForFile(it) }
     }
+
     fun setHiddenLineKeywords(keywords: List<String>) {
-        _hiddenLineKeywords.value = emptyList()
+        val updated = keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        _hiddenLineKeywords.value = updated
+        _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = updated)
+        sharedPrefs?.edit()?.putStringSet("hidden_line_keywords", updated.toSet())?.apply()
+        _selectedFile.value?.let { loadDiffForFile(it) }
     }
 
     fun setAppTheme(theme: AppTheme) {
