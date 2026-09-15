@@ -12,7 +12,7 @@
 
 ---
 
-## Screenshots
+## Screenshot
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/a8fee9df-9de6-4039-b9e1-2f4d4067b5cc" width="200" alt="Pick Items"/>
