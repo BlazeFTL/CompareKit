@@ -718,6 +718,10 @@ class CompareViewModel : ViewModel() {
         }
 
         if (target == PickerTarget.ORIGINAL) {
+            _compareArchiveInfo.value = null
+            _isTextComparison.value = false
+            _textComparisonOriginal.value = ""
+            _textComparisonModified.value = ""
             if (_sourceFile.value?.absolutePath != item.absolutePath) {
                 _treeExpandedPaths.value = null
                 parentTreeExpandedPaths = null
@@ -726,6 +730,10 @@ class CompareViewModel : ViewModel() {
             _sourceName.value = item.name
             _sourceIsZip.value = item.name.lowercase().let { it.endsWith(".zip") || it.endsWith(".apk") }
         } else if (target == PickerTarget.MODIFIED) {
+            _compareArchiveInfo.value = null
+            _isTextComparison.value = false
+            _textComparisonOriginal.value = ""
+            _textComparisonModified.value = ""
             if (_modifiedFile.value?.absolutePath != item.absolutePath) {
                 _treeExpandedPaths.value = null
                 parentTreeExpandedPaths = null
@@ -750,6 +758,14 @@ class CompareViewModel : ViewModel() {
     }
 
     fun performArchiveComparison(archiveFile: File) {
+        _isTextComparison.value = false
+        _textComparisonOriginal.value = ""
+        _textComparisonModified.value = ""
+        _sourceDir.value = null
+        _modifiedDir.value = null
+        _activeDexVirtualPath.value = null
+        _selectedDexClassDetail.value = null
+        _selectedFile.value = null
         viewModelScope.launch {
             _isProcessing.value = true
             _errorMessage.value = null
@@ -819,6 +835,13 @@ class CompareViewModel : ViewModel() {
         title: String = "Text Comparison",
         languageExt: String = "txt"
     ) {
+        _sourceFile.value = null
+        _sourceName.value = null
+        _modifiedFile.value = null
+        _modifiedName.value = null
+        _sourceDir.value = null
+        _modifiedDir.value = null
+        _compareArchiveInfo.value = null
         _isTextComparison.value = true
         _textComparisonOriginal.value = originalText
         _textComparisonModified.value = modifiedText
@@ -831,7 +854,7 @@ class CompareViewModel : ViewModel() {
             relativePath = "$cleanTitle.$cleanExt",
             status = FileStatus.MODIFIED,
             isBinary = false,
-            originalPath = "Original"
+            originalPath = "TEXT_COMPARE_ORIGINAL"
         )
         selectFileForDiff(statusItem)
     }
@@ -935,14 +958,14 @@ class CompareViewModel : ViewModel() {
     }
 
     private fun getRawFileBytes(isSource: Boolean, relativePath: String): ByteArray? {
-        if (_isTextComparison.value) {
-            val text = if (isSource) _textComparisonOriginal.value else _textComparisonModified.value
-            return text.toByteArray(Charsets.UTF_8)
-        }
         val archiveInfo = _compareArchiveInfo.value
         if (archiveInfo != null) {
             val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
             return CompareArchiveHelper.getEntryBytes(archiveInfo, cleanPath, isStock = isSource)
+        }
+        if (_isTextComparison.value && _sourceFile.value == null && _sourceDir.value == null) {
+            val text = if (isSource) _textComparisonOriginal.value else _textComparisonModified.value
+            return text.toByteArray(Charsets.UTF_8)
         }
         val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
         val isZip = if (isSource) _sourceIsZip.value else _modifiedIsZip.value
@@ -965,14 +988,14 @@ class CompareViewModel : ViewModel() {
     }
 
     private fun getFileBytes(isSource: Boolean, relativePath: String): ByteArray? {
-        if (_isTextComparison.value) {
-            val text = if (isSource) _textComparisonOriginal.value else _textComparisonModified.value
-            return text.toByteArray(Charsets.UTF_8)
-        }
         val archiveInfo = _compareArchiveInfo.value
         if (archiveInfo != null) {
             val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
             return CompareArchiveHelper.getEntryBytes(archiveInfo, cleanPath, isStock = isSource)
+        }
+        if (_isTextComparison.value && _sourceFile.value == null && _sourceDir.value == null) {
+            val text = if (isSource) _textComparisonOriginal.value else _textComparisonModified.value
+            return text.toByteArray(Charsets.UTF_8)
         }
         val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
         if (_activeDexVirtualPath.value != null) {
@@ -1005,14 +1028,14 @@ class CompareViewModel : ViewModel() {
     }
 
     private fun getFileLines(isSource: Boolean, relativePath: String): List<String> {
-        if (_isTextComparison.value) {
-            val text = if (isSource) _textComparisonOriginal.value else _textComparisonModified.value
-            return text.lines()
-        }
         val archiveInfo = _compareArchiveInfo.value
         if (archiveInfo != null) {
             val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
             return CompareArchiveHelper.getEntryLines(archiveInfo, cleanPath, isStock = isSource) ?: emptyList()
+        }
+        if (_isTextComparison.value && _sourceFile.value == null && _sourceDir.value == null) {
+            val text = if (isSource) _textComparisonOriginal.value else _textComparisonModified.value
+            return text.lines()
         }
         val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
         if (_activeDexVirtualPath.value != null) {
@@ -1048,6 +1071,10 @@ class CompareViewModel : ViewModel() {
         val srcFile = _sourceFile.value ?: return
         val modFile = _modifiedFile.value ?: return
 
+        _compareArchiveInfo.value = null
+        _isTextComparison.value = false
+        _textComparisonOriginal.value = ""
+        _textComparisonModified.value = ""
         _searchQuery.value = ""
         _activeFileSearchQuery.value = ""
         _statusFilter.value = null
@@ -1233,6 +1260,11 @@ class CompareViewModel : ViewModel() {
         val srcFile = _sourceFile.value ?: return
         val modFile = _modifiedFile.value ?: return
         val isBothZip = _sourceIsZip.value && _modifiedIsZip.value
+
+        _compareArchiveInfo.value = null
+        _isTextComparison.value = false
+        _textComparisonOriginal.value = ""
+        _textComparisonModified.value = ""
 
         comparisonJob?.cancel()
         comparisonJob = viewModelScope.launch {
@@ -1421,14 +1453,23 @@ class CompareViewModel : ViewModel() {
         _activeFileSearchQuery.value = ""
         _selectedDexClassDetail.value = null
         if (fileStatus != null) {
+            if (fileStatus.originalPath != "TEXT_COMPARE_ORIGINAL") {
+                _isTextComparison.value = false
+            }
             val pathLower = fileStatus.relativePath.lowercase()
-            val isSmaliOrDex = pathLower.endsWith(".smali") || pathLower.endsWith(".dex") || _activeDexVirtualPath.value != null
+            val isSmaliOrDex = pathLower.endsWith(".smali") || pathLower.endsWith(".dex") || _activeDexVirtualPath.value != null || _compareArchiveInfo.value != null
             if (isSmaliOrDex) {
                 _lineWrapEnabled.value = false
             }
             loadDiffForFile(fileStatus)
         } else {
             _diffLines.value = emptyList()
+            if (_isTextComparison.value) {
+                _isTextComparison.value = false
+                _textComparisonOriginal.value = ""
+                _textComparisonModified.value = ""
+                _hasRunComparison.value = false
+            }
         }
     }
 
@@ -1557,7 +1598,10 @@ class CompareViewModel : ViewModel() {
                         var srcLines = if (srcBytes.isNotEmpty()) String(srcBytes, Charsets.UTF_8).lines() else emptyList()
                         var modLines = if (modBytes.isNotEmpty()) String(modBytes, Charsets.UTF_8).lines() else emptyList()
 
-                        if (fileStatus.relativePath.lowercase().endsWith(".smali")) {
+                        val isSmali = fileStatus.relativePath.lowercase().endsWith(".smali") ||
+                            (_compareArchiveInfo.value != null && (srcLines.firstOrNull { it.isNotBlank() }?.startsWith(".class") == true || modLines.firstOrNull { it.isNotBlank() }?.startsWith(".class") == true))
+
+                        if (isSmali) {
                             srcLines = DexParser.preprocessSmali(srcLines, _dexCompareOptions.value)
                             modLines = DexParser.preprocessSmali(modLines, _dexCompareOptions.value)
                         }
