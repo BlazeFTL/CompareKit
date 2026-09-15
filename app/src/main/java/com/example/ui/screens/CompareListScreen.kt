@@ -53,6 +53,8 @@ import com.example.ui.components.DiffSettingsDialog
 import com.example.ui.components.FocusAndFilterDialog
 import com.example.ui.components.ExplorerSortBottomSheet
 import com.example.ui.components.MinimapScrollbar
+import com.example.ui.components.CompareTextDialog
+import com.example.file.CompareArchiveHelper
 import com.example.ui.viewmodel.CompareViewModel
 import com.example.ui.viewmodel.ExplorerSortMode
 import com.example.ui.viewmodel.PickerTarget
@@ -135,10 +137,19 @@ fun CompareListScreen(
     var exportFormatChoice by remember { mutableStateOf(0) } // 0 = .diff, 1 = .txt, 2 = .zip
     var showDecompiledApkOptionsDialog by remember { mutableStateOf(false) }
     var showExitConfirmationDialog by remember { mutableStateOf(false) }
+    var showCompareTextDialog by remember { mutableStateOf(false) }
     var isTreeViewMode by rememberSaveable { mutableStateOf(true) }
     val lineHeightMultiplier by viewModel.lineHeightMultiplier.collectAsState()
     val activeDexVirtualPath by viewModel.activeDexVirtualPath.collectAsState()
     val isCombinedMultidex by viewModel.isCombinedMultidex.collectAsState()
+
+    val pickCompareArchiveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importArchiveFromUri(context, uri)
+        }
+    }
 
     val saveAllDiffsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
@@ -540,7 +551,16 @@ fun CompareListScreen(
 
                 // PHASE 2: IN-APP FILE EXPLORER IS OPEN - Browsing storage files/folders
                 activePickerTarget != PickerTarget.NONE -> {
-                    val targetTitle = if (activePickerTarget == PickerTarget.ORIGINAL) "Pick Original File" else "Pick Modified File"
+                    val targetTitle = when (activePickerTarget) {
+                        PickerTarget.ORIGINAL -> "Pick Original File"
+                        PickerTarget.MODIFIED -> "Pick Modified File"
+                        PickerTarget.COMPARE_ARCHIVE -> "Select Compare Zip / .mtcr File"
+                        else -> "Pick File"
+                    }
+                    val targetSubtitle = when (activePickerTarget) {
+                        PickerTarget.COMPARE_ARCHIVE -> "Select a .mtcr or .zip containing A/B or Stock/Modified"
+                        else -> "Navigate to a folder, zip, apk, or code file"
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -561,7 +581,7 @@ fun CompareListScreen(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 Text(
-                                    text = "Navigate to a folder, zip, apk, or code file",
+                                    text = targetSubtitle,
                                     style = MaterialTheme.typography.bodySmall,
                                     fontSize = 11.5.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -774,14 +794,20 @@ fun CompareListScreen(
                                     items = explorerFilesList,
                                     key = { file -> file.absolutePath }
                                 ) { file ->
-                                    val isZip = file.name.lowercase().endsWith(".zip") || file.name.lowercase().endsWith(".apk")
+                                    val nameLower = file.name.lowercase()
+                                    val isZip = nameLower.endsWith(".zip") || nameLower.endsWith(".apk")
+                                    val isMtcr = nameLower.endsWith(".mtcr")
                                     val isDir = file.isDirectory
+                                    val isCompareArch = !isDir && (isMtcr || (isZip && CompareArchiveHelper.isCompareArchive(file)))
 
                                     Surface(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surface,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                                        color = if (isCompareArch) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surface,
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isCompareArch) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                        ),
                                         onClick = {
                                             if (isDir) {
                                                 viewModel.navigateToExplorerDir(file)
@@ -806,15 +832,15 @@ fun CompareListScreen(
                                                     text = file.name,
                                                     style = MaterialTheme.typography.bodySmall,
                                                     fontSize = 13.sp,
-                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontWeight = if (isCompareArch) FontWeight.Bold else FontWeight.SemiBold,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
                                                 Text(
-                                                    text = if (isDir) "Directory" else if (isZip) "Archive (${formatSize(file.length())})" else "File (${formatSize(file.length())})",
+                                                    text = if (isDir) "Directory" else if (isCompareArch) "Compare Archive (${formatSize(file.length())})" else if (isZip) "Archive (${formatSize(file.length())})" else "File (${formatSize(file.length())})",
                                                     style = MaterialTheme.typography.labelSmall,
                                                     fontSize = 10.5.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    color = if (isCompareArch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
                                             Button(
@@ -963,6 +989,61 @@ fun CompareListScreen(
                                         )
                                     }
                                 }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Divider: OR OTHER COMPARISON MODES
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.weight(1f),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                    )
+                                    Text(
+                                        "OR OTHER MODES",
+                                        style = TextStyle(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 1.2.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                        ),
+                                        modifier = Modifier.padding(horizontal = 12.dp)
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.weight(1f),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                    )
+                                }
+
+                                // 1. Compare Text Option (Original Text vs Modified Text)
+                                PickerTargetCard(
+                                    title = "Compare Text",
+                                    subtitle = "Type or paste Original vs Modified text directly",
+                                    selectedName = null,
+                                    isSelected = false,
+                                    icon = Icons.Outlined.TextFields,
+                                    accentColor = MaterialTheme.colorScheme.primary,
+                                    onClick = { showCompareTextDialog = true }
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // 2. Select Compare Zip / .mtcr File Option
+                                PickerTargetCard(
+                                    title = "Select Compare Zip / .mtcr File",
+                                    subtitle = "MT Manager .mtcr or zip containing A/B or Stock/Modified",
+                                    selectedName = null,
+                                    isSelected = false,
+                                    icon = Icons.Outlined.Archive,
+                                    accentColor = MaterialTheme.colorScheme.tertiary,
+                                    onClick = { viewModel.setActivePickerTarget(PickerTarget.COMPARE_ARCHIVE) }
+                                )
                             }
                         }
 
@@ -1863,6 +1944,17 @@ fun CompareListScreen(
             onRemoveHiddenKeyword = { viewModel.removeHiddenLineKeyword(it) },
             onClearHiddenKeywords = { viewModel.clearHiddenLineKeywords() },
             onDismiss = { showFocusFilterDialog = false }
+        )
+    }
+
+    // COMPARE TEXT DIALOG
+    if (showCompareTextDialog) {
+        CompareTextDialog(
+            onDismiss = { showCompareTextDialog = false },
+            onCompare = { orig, mod, title, ext ->
+                showCompareTextDialog = false
+                viewModel.performTextComparison(orig, mod, title, ext)
+            }
         )
     }
 

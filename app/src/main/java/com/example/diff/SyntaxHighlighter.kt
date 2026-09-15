@@ -18,7 +18,7 @@ object SyntaxHighlighter {
     private val ATTR_COLOR = Color(0xFF3F51B5)    // Indigo
 
     // High-performance LRU Cache for rendered syntax lines
-    private val cache = LruCache<String, AnnotatedString>(8192)
+    private val cache = LruCache<String, AnnotatedString>(16384)
 
     // Precompiled static Regex instances
     private val JSON_STRING_REGEX = "\"[^\"]*\"".toRegex()
@@ -43,68 +43,98 @@ object SyntaxHighlighter {
     fun highlight(text: String, filename: String): AnnotatedString {
         if (text.isEmpty()) return AnnotatedString("")
         val ext = filename.lowercase().substringAfterLast('.', "")
-        if (ext !in setOf("json", "xml", "html", "htm", "js", "ts", "kt", "java", "css", "smali", "dex")) {
+        val isKnownExt = ext in setOf("json", "xml", "html", "htm", "js", "ts", "kt", "java", "css", "smali", "dex")
+        val looksLikeSmali = !isKnownExt && (
+            text.startsWith(".") || text.startsWith("#") || text.contains("const-string") ||
+            text.contains("invoke-") || text.contains(".method") || text.contains(".class") ||
+            text.contains("goto") || text.contains("return")
+        )
+
+        val targetExt = if (isKnownExt) ext else if (looksLikeSmali) "smali" else null
+        if (targetExt == null) {
             return AnnotatedString(text)
         }
 
-        val cacheKey = "$ext:$text"
+        val cacheKey = "$targetExt:$text"
         val cached = cache.get(cacheKey)
         if (cached != null) {
             return cached
         }
 
-        val result = when (ext) {
+        val result = when (targetExt) {
             "json" -> highlightJson(text)
             "xml", "html", "htm" -> highlightXmlHtml(text)
             "smali", "dex" -> highlightSmali(text)
             "js", "ts", "kt", "java", "css" -> highlightCode(text)
             else -> AnnotatedString(text)
         }
-
         cache.put(cacheKey, result)
         return result
     }
 
     private fun highlightSmali(text: String): AnnotatedString {
-        val stringMatches = CODE_STRING_REGEX.findAll(text).toList()
-        val commentMatches = SMALI_COMMENT_REGEX.findAll(text).toList()
-        val ignoreRanges = stringMatches + commentMatches
+        if (text.isEmpty()) return AnnotatedString("")
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return AnnotatedString(text)
+
+        // Fast path for full line comments
+        if (trimmed.startsWith("#")) {
+            return buildAnnotatedString {
+                append(text)
+                addStyle(SpanStyle(color = COMMENT_COLOR, fontFamily = FontFamily.Monospace), 0, text.length)
+            }
+        }
+
+        val hasQuotes = '"' in text || '\'' in text
+        val hasHash = '#' in text
+        val stringMatches = if (hasQuotes) CODE_STRING_REGEX.findAll(text).toList() else emptyList()
+        val commentMatches = if (hasHash) SMALI_COMMENT_REGEX.findAll(text).toList() else emptyList()
+        val hasIgnore = stringMatches.isNotEmpty() || commentMatches.isNotEmpty()
+        val ignoreRanges = if (hasIgnore) stringMatches + commentMatches else emptyList()
 
         return buildAnnotatedString {
             append(text)
 
-            // Directives (.method, .registers, etc.)
-            SMALI_DIRECTIVE_REGEX.findAll(text).forEach { match ->
-                if (!isInsideRanges(match.range.first, ignoreRanges)) {
-                    addStyle(SpanStyle(color = KEYWORD_COLOR, fontWeight = FontWeight.Bold), match.range.first, match.range.last + 1)
+            // Directives (.method, .registers, etc.) - skip if no dot
+            if ('.' in text) {
+                SMALI_DIRECTIVE_REGEX.findAll(text).forEach { match ->
+                    if (!hasIgnore || !isInsideRanges(match.range.first, ignoreRanges)) {
+                        addStyle(SpanStyle(color = KEYWORD_COLOR, fontWeight = FontWeight.Bold), match.range.first, match.range.last + 1)
+                    }
                 }
             }
 
             // Instructions (invoke-virtual, const-string, if-nez, etc.)
             SMALI_INSTRUCTION_REGEX.findAll(text).forEach { match ->
-                if (!isInsideRanges(match.range.first, ignoreRanges)) {
+                if (!hasIgnore || !isInsideRanges(match.range.first, ignoreRanges)) {
                     addStyle(SpanStyle(color = KEYWORD_COLOR, fontWeight = FontWeight.Bold), match.range.first, match.range.last + 1)
                 }
             }
 
-            // Labels (:label_1, :goto_0, etc.)
-            SMALI_LABEL_REGEX.findAll(text).forEach { match ->
-                if (!isInsideRanges(match.range.first, ignoreRanges)) {
-                    addStyle(SpanStyle(color = TAG_COLOR, fontWeight = FontWeight.Medium), match.range.first, match.range.last + 1)
+            // Labels (:label_1, :goto_0, etc.) - skip if no colon
+            if (':' in text) {
+                SMALI_LABEL_REGEX.findAll(text).forEach { match ->
+                    if (!hasIgnore || !isInsideRanges(match.range.first, ignoreRanges)) {
+                        addStyle(SpanStyle(color = TAG_COLOR, fontWeight = FontWeight.Medium), match.range.first, match.range.last + 1)
+                    }
                 }
             }
 
-            // Registers (v0, v1, p0, p1, etc.)
-            SMALI_REGISTER_REGEX.findAll(text).forEach { match ->
-                if (!isInsideRanges(match.range.first, ignoreRanges)) {
-                    addStyle(SpanStyle(color = ATTR_COLOR, fontWeight = FontWeight.Normal), match.range.first, match.range.last + 1)
+            // Registers (v0, v1, p0, p1, etc.) - skip if no v and no p
+            if ('v' in text || 'p' in text) {
+                SMALI_REGISTER_REGEX.findAll(text).forEach { match ->
+                    if (!hasIgnore || !isInsideRanges(match.range.first, ignoreRanges)) {
+                        addStyle(SpanStyle(color = ATTR_COLOR, fontWeight = FontWeight.Normal), match.range.first, match.range.last + 1)
+                    }
                 }
             }
 
-            // Numbers & Hex
-            SMALI_NUMBER_REGEX.findAll(text).forEach { match ->
-                if (!isInsideRanges(match.range.first, ignoreRanges)) {
-                    addStyle(SpanStyle(color = NUMBER_COLOR), match.range.first, match.range.last + 1)
+            // Numbers & Hex - skip if no digit
+            if (text.any { it.isDigit() }) {
+                SMALI_NUMBER_REGEX.findAll(text).forEach { match ->
+                    if (!hasIgnore || !isInsideRanges(match.range.first, ignoreRanges)) {
+                        addStyle(SpanStyle(color = NUMBER_COLOR), match.range.first, match.range.last + 1)
+                    }
                 }
             }
 

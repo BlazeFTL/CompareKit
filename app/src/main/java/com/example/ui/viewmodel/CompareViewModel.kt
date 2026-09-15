@@ -26,6 +26,8 @@ import com.example.file.DexClassPointer
 import com.example.file.toTextRepresentation
 import com.example.file.ArscParser
 import com.example.file.AxmlDecoder
+import com.example.file.CompareArchiveHelper
+import com.example.file.ArchiveCompareInfo
 import com.example.ui.theme.AppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -45,7 +47,7 @@ enum class DiffViewMode {
 }
 
 enum class PickerTarget {
-    NONE, ORIGINAL, MODIFIED
+    NONE, ORIGINAL, MODIFIED, COMPARE_ARCHIVE
 }
 
 enum class ExplorerSortMode(val displayName: String) {
@@ -134,6 +136,27 @@ class CompareViewModel : ViewModel() {
 
     private val _isExportMinimized = MutableStateFlow(false)
     val isExportMinimized: StateFlow<Boolean> = _isExportMinimized.asStateFlow()
+
+    // MTCR / ZIP Compare Archive state
+    private val _compareArchiveInfo = MutableStateFlow<ArchiveCompareInfo?>(null)
+    val compareArchiveInfo: StateFlow<ArchiveCompareInfo?> = _compareArchiveInfo.asStateFlow()
+    val isCompareArchive: Boolean get() = _compareArchiveInfo.value != null
+
+    // Text Comparison state
+    private val _isTextComparison = MutableStateFlow(false)
+    val isTextComparison: StateFlow<Boolean> = _isTextComparison.asStateFlow()
+
+    private val _textComparisonOriginal = MutableStateFlow("")
+    val textComparisonOriginal: StateFlow<String> = _textComparisonOriginal.asStateFlow()
+
+    private val _textComparisonModified = MutableStateFlow("")
+    val textComparisonModified: StateFlow<String> = _textComparisonModified.asStateFlow()
+
+    private val _textComparisonTitle = MutableStateFlow("Text Comparison")
+    val textComparisonTitle: StateFlow<String> = _textComparisonTitle.asStateFlow()
+
+    private val _textComparisonLanguage = MutableStateFlow("txt")
+    val textComparisonLanguage: StateFlow<String> = _textComparisonLanguage.asStateFlow()
 
     // Focus Mode (Context Lines Around Changes)
     private val _focusModeEnabled = MutableStateFlow(false)
@@ -677,6 +700,23 @@ class CompareViewModel : ViewModel() {
 
     fun selectExplorerItemForTarget(item: File) {
         val target = _activePickerTarget.value
+        if (target == PickerTarget.COMPARE_ARCHIVE) {
+            _activePickerTarget.value = PickerTarget.NONE
+            performArchiveComparison(item)
+            return
+        }
+
+        // Auto-detect .mtcr or zip files structured as compare archives (A/B or Stock/Modified)
+        val nameLower = item.name.lowercase()
+        val isMtcrOrArchive = nameLower.endsWith(".mtcr") || 
+            ((nameLower.endsWith(".zip") || nameLower.endsWith(".apk")) && CompareArchiveHelper.isCompareArchive(item))
+
+        if (isMtcrOrArchive && (target == PickerTarget.ORIGINAL || target == PickerTarget.MODIFIED)) {
+            _activePickerTarget.value = PickerTarget.NONE
+            performArchiveComparison(item)
+            return
+        }
+
         if (target == PickerTarget.ORIGINAL) {
             if (_sourceFile.value?.absolutePath != item.absolutePath) {
                 _treeExpandedPaths.value = null
@@ -709,6 +749,93 @@ class CompareViewModel : ViewModel() {
         selectExplorerItemForTarget(current)
     }
 
+    fun performArchiveComparison(archiveFile: File) {
+        viewModelScope.launch {
+            _isProcessing.value = true
+            _errorMessage.value = null
+            try {
+                val info = withContext(Dispatchers.IO) {
+                    CompareArchiveHelper.analyzeArchive(archiveFile)
+                }
+                if (info == null) {
+                    _errorMessage.value = "File is not a valid compare archive. Expected 'a' and 'b' or 'Stock' and 'Modified' folders."
+                    _isProcessing.value = false
+                    return@launch
+                }
+                _compareArchiveInfo.value = info
+                _sourceName.value = "Stock (${info.stockPrefix.removeSuffix("/")})"
+                _modifiedName.value = "Modified (${info.modPrefix.removeSuffix("/")})"
+                _sourceFile.value = archiveFile
+                _modifiedFile.value = archiveFile
+                _sourceIsZip.value = true
+                _modifiedIsZip.value = true
+
+                val results = withContext(Dispatchers.IO) {
+                    CompareArchiveHelper.compareArchive(info, _diffOptions.value) { p ->
+                        _compareProgress.value = p
+                    }
+                }
+                _fileList.value = results
+                _hasRunComparison.value = true
+            } catch (e: Exception) {
+                _errorMessage.value = "Error comparing archive: ${e.message}"
+            } finally {
+                _isProcessing.value = false
+                _compareProgress.value = null
+            }
+        }
+    }
+
+    fun importArchiveFromUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _isProcessing.value = true
+            _errorMessage.value = null
+            try {
+                val tempFile = withContext(Dispatchers.IO) {
+                    val temp = File(context.cacheDir, "imported_compare_${System.currentTimeMillis()}.mtcr")
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        temp.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    temp
+                }
+                if (tempFile.exists() && tempFile.length() > 0) {
+                    performArchiveComparison(tempFile)
+                } else {
+                    _errorMessage.value = "Failed to read selected archive file."
+                    _isProcessing.value = false
+                }
+            } catch (e: Exception) {
+                _errorMessage.value = "Error reading archive: ${e.message}"
+                _isProcessing.value = false
+            }
+        }
+    }
+
+    fun performTextComparison(
+        originalText: String,
+        modifiedText: String,
+        title: String = "Text Comparison",
+        languageExt: String = "txt"
+    ) {
+        _isTextComparison.value = true
+        _textComparisonOriginal.value = originalText
+        _textComparisonModified.value = modifiedText
+        val cleanTitle = title.ifBlank { "Text Comparison" }
+        val cleanExt = languageExt.ifBlank { "txt" }.trimStart('.')
+        _textComparisonTitle.value = cleanTitle
+        _textComparisonLanguage.value = cleanExt
+
+        val statusItem = FileCompareStatus(
+            relativePath = "$cleanTitle.$cleanExt",
+            status = FileStatus.MODIFIED,
+            isBinary = false,
+            originalPath = "Original"
+        )
+        selectFileForDiff(statusItem)
+    }
+
     fun resetComparisonSelection() {
         _sourceFile.value = null
         _sourceName.value = null
@@ -727,6 +854,10 @@ class CompareViewModel : ViewModel() {
         _selectedDexClassDetail.value = null
         _treeExpandedPaths.value = null
         parentTreeExpandedPaths = null
+        _compareArchiveInfo.value = null
+        _isTextComparison.value = false
+        _textComparisonOriginal.value = ""
+        _textComparisonModified.value = ""
         clearHiddenLineKeywords()
         _diffOptions.value = _diffOptions.value.copy(ignoredLineKeywords = emptyList())
         DexStorageManager.clearCache()
@@ -804,6 +935,15 @@ class CompareViewModel : ViewModel() {
     }
 
     private fun getRawFileBytes(isSource: Boolean, relativePath: String): ByteArray? {
+        if (_isTextComparison.value) {
+            val text = if (isSource) _textComparisonOriginal.value else _textComparisonModified.value
+            return text.toByteArray(Charsets.UTF_8)
+        }
+        val archiveInfo = _compareArchiveInfo.value
+        if (archiveInfo != null) {
+            val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
+            return CompareArchiveHelper.getEntryBytes(archiveInfo, cleanPath, isStock = isSource)
+        }
         val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
         val isZip = if (isSource) _sourceIsZip.value else _modifiedIsZip.value
         val zipFile = if (isSource) _sourceFile.value else _modifiedFile.value
@@ -825,6 +965,15 @@ class CompareViewModel : ViewModel() {
     }
 
     private fun getFileBytes(isSource: Boolean, relativePath: String): ByteArray? {
+        if (_isTextComparison.value) {
+            val text = if (isSource) _textComparisonOriginal.value else _textComparisonModified.value
+            return text.toByteArray(Charsets.UTF_8)
+        }
+        val archiveInfo = _compareArchiveInfo.value
+        if (archiveInfo != null) {
+            val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
+            return CompareArchiveHelper.getEntryBytes(archiveInfo, cleanPath, isStock = isSource)
+        }
         val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
         if (_activeDexVirtualPath.value != null) {
             val className = cleanPath.removeSuffix(".smali").replace('/', '.')
@@ -856,6 +1005,15 @@ class CompareViewModel : ViewModel() {
     }
 
     private fun getFileLines(isSource: Boolean, relativePath: String): List<String> {
+        if (_isTextComparison.value) {
+            val text = if (isSource) _textComparisonOriginal.value else _textComparisonModified.value
+            return text.lines()
+        }
+        val archiveInfo = _compareArchiveInfo.value
+        if (archiveInfo != null) {
+            val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
+            return CompareArchiveHelper.getEntryLines(archiveInfo, cleanPath, isStock = isSource) ?: emptyList()
+        }
         val cleanPath = relativePath.removePrefix("/").replace('\\', '/')
         if (_activeDexVirtualPath.value != null) {
             val className = cleanPath.removeSuffix(".smali").replace('/', '.')

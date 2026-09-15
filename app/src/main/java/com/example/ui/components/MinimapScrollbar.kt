@@ -19,6 +19,12 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
+data class MinimapTickRange(
+    val startRatio: Float,
+    val endRatio: Float,
+    val color: Color
+)
+
 @Composable
 fun <T> MinimapScrollbar(
     listState: LazyListState,
@@ -28,6 +34,58 @@ fun <T> MinimapScrollbar(
 ) {
     val coroutineScope = rememberCoroutineScope()
     var trackHeight by remember { mutableStateOf(0f) }
+
+    // Precompute merged tick ranges ONCE when items change.
+    // This turns thousands of loop iterations and per-frame object allocations into drawing
+    // only the distinct change blocks, eliminating scroll lag and frame drops!
+    val tickRanges = remember(items, colorSelector) {
+        if (items.isEmpty()) return@remember emptyList<MinimapTickRange>()
+        val totalCount = items.size.toFloat()
+        val result = ArrayList<MinimapTickRange>(minOf(items.size, 500))
+        var blockStart = -1
+        var activeColor: Color? = null
+
+        for (i in items.indices) {
+            val color = colorSelector(items[i])
+            if (color != null) {
+                if (activeColor == null) {
+                    blockStart = i
+                    activeColor = color
+                } else if (activeColor != color) {
+                    result.add(
+                        MinimapTickRange(
+                            startRatio = blockStart / totalCount,
+                            endRatio = i / totalCount,
+                            color = activeColor
+                        )
+                    )
+                    blockStart = i
+                    activeColor = color
+                }
+            } else {
+                if (activeColor != null) {
+                    result.add(
+                        MinimapTickRange(
+                            startRatio = blockStart / totalCount,
+                            endRatio = i / totalCount,
+                            color = activeColor
+                        )
+                    )
+                    activeColor = null
+                }
+            }
+        }
+        if (activeColor != null) {
+            result.add(
+                MinimapTickRange(
+                    startRatio = blockStart / totalCount,
+                    endRatio = 1f,
+                    color = activeColor
+                )
+            )
+        }
+        result
+    }
 
     val scrollToList: (Float) -> Unit = { yOffset ->
         if (trackHeight > 0 && items.isNotEmpty()) {
@@ -83,29 +141,29 @@ fun <T> MinimapScrollbar(
 
             val canvasHeight = size.height
             val canvasWidth = size.width
+            val minTickHeightPx = 2.dp.toPx()
 
-            // 1. Draw colored ticks for each modification/addition/deletion at its proportional vertical location
-            items.forEachIndexed { index, item ->
-                val tickColor = colorSelector(item)
-                if (tickColor != null) {
-                    val y = (index.toFloat() / totalCount) * canvasHeight
-                    drawLine(
-                        color = tickColor,
-                        start = Offset(x = 1.dp.toPx(), y = y),
-                        end = Offset(x = canvasWidth - 1.dp.toPx(), y = y),
-                        strokeWidth = 2.dp.toPx()
-                    )
-                }
+            // 1. Draw only precomputed tick ranges (fast, zero per-frame item loops)
+            for (tick in tickRanges) {
+                val yStart = tick.startRatio * canvasHeight
+                val yEnd = tick.endRatio * canvasHeight
+                val tickHeight = maxOf(minTickHeightPx, yEnd - yStart)
+
+                drawRect(
+                    color = tick.color,
+                    topLeft = Offset(x = 1.dp.toPx(), y = yStart),
+                    size = Size(width = canvasWidth - 2.dp.toPx(), height = tickHeight)
+                )
             }
 
             // 2. Draw the scrollbar thumb representing the visible screen section
             val visibleInfo = listState.layoutInfo.visibleItemsInfo
             if (visibleInfo.isNotEmpty()) {
                 val firstVisible = listState.firstVisibleItemIndex
-                val lastVisible = visibleInfo.lastOrNull()?.index ?: firstVisible
+                val visibleCount = visibleInfo.size
 
-                val topRatio = firstVisible.toFloat() / totalCount
-                val bottomRatio = (lastVisible + 1).toFloat() / totalCount
+                val topRatio = (firstVisible.toFloat() / totalCount).coerceIn(0f, 1f)
+                val bottomRatio = ((firstVisible + visibleCount).toFloat() / totalCount).coerceIn(0f, 1f)
 
                 val thumbTop = topRatio * canvasHeight
                 val thumbBottom = bottomRatio * canvasHeight

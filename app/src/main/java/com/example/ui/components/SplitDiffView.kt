@@ -142,40 +142,33 @@ fun SplitDiffView(
     }
     val computedTotalWidthDp = (computedHalfWidthDp * 2).dp
 
-    SelectionContainer(
+    Box(
         modifier = modifier.fillMaxSize()
     ) {
         Box(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    end = 30.dp,
+                    bottom = if (!lineWrap && horizontalScrollState.maxValue > 0) 8.dp else 0.dp
+                )
+                .then(
+                    if (!lineWrap) Modifier.horizontalScroll(horizontalScrollState) else Modifier
+                )
         ) {
-            Box(
+            LazyColumn(
+                state = listState,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(
-                        end = 30.dp,
-                        bottom = if (!lineWrap && horizontalScrollState.maxValue > 0) 8.dp else 0.dp
-                    )
+                    .fillMaxHeight()
                     .then(
-                        if (!lineWrap) Modifier.horizontalScroll(horizontalScrollState) else Modifier
+                        if (!lineWrap) Modifier.width(computedTotalWidthDp) else Modifier.fillMaxWidth()
                     )
+                    .background(MaterialTheme.colorScheme.surface)
             ) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .then(
-                            if (!lineWrap) Modifier.width(computedTotalWidthDp) else Modifier.fillMaxWidth()
-                        )
-                        .background(MaterialTheme.colorScheme.surface)
-                ) {
-                    itemsIndexed(
-                        items = splitRows,
-                        key = { rowIndex, row ->
-                            val l = row.leftItem
-                            val r = row.rightItem
-                            "${rowIndex}_${l?.type}_${l?.originalIndex}_${r?.type}_${r?.revisedIndex}"
-                        }
-                    ) { rowIndex, row ->
+                itemsIndexed(
+                    items = splitRows,
+                    key = { rowIndex, _ -> rowIndex }
+                ) { rowIndex, row ->
                         // Visual banner for collapsed lines in between distant changes or at start
                         if (rowIndex == 0) {
                             val startOrig = row.leftItem?.originalIndex ?: 0
@@ -264,38 +257,33 @@ fun SplitDiffView(
                 }
             }
 
-            // Bottom horizontal scroll bar indicator
-            if (!lineWrap && horizontalScrollState.maxValue > 0) {
-                DisableSelection {
-                    HorizontalScrollBar(
-                        scrollState = horizontalScrollState,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .fillMaxWidth()
-                            .padding(start = 18.dp, end = 34.dp, bottom = 2.dp)
-                    )
+        // Bottom horizontal scroll bar indicator
+        if (!lineWrap && horizontalScrollState.maxValue > 0) {
+            HorizontalScrollBar(
+                scrollState = horizontalScrollState,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(start = 18.dp, end = 34.dp, bottom = 2.dp)
+            )
+        }
+
+        MinimapScrollbar(
+            listState = listState,
+            items = splitRows,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight(),
+            colorSelector = { row ->
+                val type = row.leftItem?.type ?: row.rightItem?.type
+                when (type) {
+                    DiffType.INSERT -> Color(0xFF2E7D32)
+                    DiffType.DELETE -> Color(0xFFC62828)
+                    DiffType.MODIFIED -> Color(0xFFEF6C00)
+                    else -> null
                 }
             }
-
-            DisableSelection {
-                MinimapScrollbar(
-                    listState = listState,
-                    items = splitRows,
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .fillMaxHeight(),
-                    colorSelector = { row ->
-                        val type = row.leftItem?.type ?: row.rightItem?.type
-                        when (type) {
-                            DiffType.INSERT -> Color(0xFF2E7D32)
-                            DiffType.DELETE -> Color(0xFFC62828)
-                            DiffType.MODIFIED -> Color(0xFFEF6C00)
-                            else -> null
-                        }
-                    }
-                )
-            }
-        }
+        )
     }
 }
 

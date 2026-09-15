@@ -135,61 +135,54 @@ fun UnifiedDiffView(
 
     val isDarkMode = MaterialTheme.colorScheme.surface.let { (it.red + it.green + it.blue) / 3f < 0.5f }
 
-    SelectionContainer(
+    Box(
         modifier = modifier.fillMaxSize()
     ) {
         Box(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    end = 30.dp,
+                    bottom = if (!lineWrap && horizontalScrollState.maxValue > 0) 8.dp else 0.dp
+                )
+                .then(
+                    if (!lineWrap) Modifier.horizontalScroll(horizontalScrollState) else Modifier
+                )
         ) {
-            Box(
+            LazyColumn(
+                state = listState,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(
-                        end = 30.dp,
-                        bottom = if (!lineWrap && horizontalScrollState.maxValue > 0) 8.dp else 0.dp
-                    )
+                    .fillMaxHeight()
                     .then(
-                        if (!lineWrap) Modifier.horizontalScroll(horizontalScrollState) else Modifier
+                        if (!lineWrap) Modifier.width(computedWidthDp) else Modifier.fillMaxWidth()
                     )
+                    .background(MaterialTheme.colorScheme.surface)
             ) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .then(
-                            if (!lineWrap) Modifier.width(computedWidthDp) else Modifier.fillMaxWidth()
-                        )
-                        .background(MaterialTheme.colorScheme.surface)
-                ) {
-                    itemsIndexed(
-                        items = diffLines,
-                        key = { index, item -> "${index}_${item.type}_${item.originalIndex}_${item.revisedIndex}" }
-                    ) { index, item ->
-                        // Visual banner for collapsed lines in between distant changes or at start
-                        if (index == 0) {
-                            val startOrig = item.originalIndex ?: 0
-                            val startRev = item.revisedIndex ?: 0
-                            val leadingHidden = maxOf(startOrig, startRev)
-                            if (leadingHidden > 0) {
-                                DisableSelection {
-                                    CollapsedLinesBanner(count = leadingHidden, label = "at start")
-                                }
-                            }
-                        } else {
-                            val prevItem = diffLines[index - 1]
-                            val origGap = if (item.originalIndex != null && prevItem.originalIndex != null) {
-                                item.originalIndex - prevItem.originalIndex - 1
-                            } else 0
-                            val revGap = if (item.revisedIndex != null && prevItem.revisedIndex != null) {
-                                item.revisedIndex - prevItem.revisedIndex - 1
-                            } else 0
-                            val gapCount = maxOf(origGap, revGap)
-                            if (gapCount > 0) {
-                                DisableSelection {
-                                    CollapsedLinesBanner(count = gapCount)
-                                }
-                            }
+                itemsIndexed(
+                    items = diffLines,
+                    key = { index, _ -> index }
+                ) { index, item ->
+                    // Visual banner for collapsed lines in between distant changes or at start
+                    if (index == 0) {
+                        val startOrig = item.originalIndex ?: 0
+                        val startRev = item.revisedIndex ?: 0
+                        val leadingHidden = maxOf(startOrig, startRev)
+                        if (leadingHidden > 0) {
+                            CollapsedLinesBanner(count = leadingHidden, label = "at start")
                         }
+                    } else {
+                        val prevItem = diffLines[index - 1]
+                        val origGap = if (item.originalIndex != null && prevItem.originalIndex != null) {
+                            item.originalIndex - prevItem.originalIndex - 1
+                        } else 0
+                        val revGap = if (item.revisedIndex != null && prevItem.revisedIndex != null) {
+                            item.revisedIndex - prevItem.revisedIndex - 1
+                        } else 0
+                        val gapCount = maxOf(origGap, revGap)
+                        if (gapCount > 0) {
+                            CollapsedLinesBanner(count = gapCount)
+                        }
+                    }
 
                         val (bgColor, prefixColor, textColor) = when (item.type) {
                             DiffType.INSERT -> {
@@ -245,66 +238,45 @@ fun UnifiedDiffView(
                                 .padding(vertical = verticalLinePadding),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            DisableSelection {
-                                // Accent bar for active change blocks
-                                Box(
-                                    modifier = Modifier
-                                        .width(3.dp)
-                                        .height(minLineRowHeight)
-                                        .background(if (isActiveLine) MaterialTheme.colorScheme.primary else Color.Transparent)
-                                )
+                            // Accent bar for active change blocks
+                            Box(
+                                modifier = Modifier
+                                    .width(3.dp)
+                                    .height(minLineRowHeight)
+                                    .background(if (isActiveLine) MaterialTheme.colorScheme.primary else Color.Transparent)
+                            )
 
-                                if (showLineNumbers) {
-                                    if (isDualLineNumbers) {
-                                        // Compact dual line numbers with minimal gap between them
-                                        Row(
-                                            modifier = Modifier.padding(start = 2.dp, end = 4.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            // Original file line number (left)
-                                            Box(
-                                                modifier = Modifier.width(singleLineNumColWidth),
-                                                contentAlignment = Alignment.CenterEnd
-                                            ) {
-                                                Text(
-                                                    text = origLineNum,
-                                                    color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color(0xFF9CA3AF),
-                                                    fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
-                                                    style = monoLineNumStyle,
-                                                    maxLines = 1,
-                                                    softWrap = false,
-                                                    overflow = TextOverflow.Clip
-                                                )
-                                            }
-
-                                            // Revised file line number (right)
-                                            Box(
-                                                modifier = Modifier.width(singleLineNumColWidth),
-                                                contentAlignment = Alignment.CenterEnd
-                                            ) {
-                                                Text(
-                                                    text = revLineNum,
-                                                    color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color(0xFF9CA3AF),
-                                                    fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
-                                                    style = monoLineNumStyle,
-                                                    maxLines = 1,
-                                                    softWrap = false,
-                                                    overflow = TextOverflow.Clip
-                                                )
-                                            }
-                                        }
-                                    } else {
-                                        // Single line number column for new files or deleted files - No wasted left gap!
-                                        val singleLineText = if (hasRevised) revLineNum else origLineNum
+                            if (showLineNumbers) {
+                                if (isDualLineNumbers) {
+                                    // Compact dual line numbers with minimal gap between them
+                                    Row(
+                                        modifier = Modifier.padding(start = 2.dp, end = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Original file line number (left)
                                         Box(
-                                            modifier = Modifier
-                                                .padding(start = 2.dp, end = 4.dp)
-                                                .width(singleLineNumColWidth),
+                                            modifier = Modifier.width(singleLineNumColWidth),
                                             contentAlignment = Alignment.CenterEnd
                                         ) {
                                             Text(
-                                                text = singleLineText,
+                                                text = origLineNum,
+                                                color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color(0xFF9CA3AF),
+                                                fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
+                                                style = monoLineNumStyle,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Clip
+                                            )
+                                        }
+
+                                        // Revised file line number (right)
+                                        Box(
+                                            modifier = Modifier.width(singleLineNumColWidth),
+                                            contentAlignment = Alignment.CenterEnd
+                                        ) {
+                                            Text(
+                                                text = revLineNum,
                                                 color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color(0xFF9CA3AF),
                                                 fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
                                                 style = monoLineNumStyle,
@@ -314,20 +286,39 @@ fun UnifiedDiffView(
                                             )
                                         }
                                     }
+                                } else {
+                                    // Single line number column for new files or deleted files - No wasted left gap!
+                                    val singleLineText = if (hasRevised) revLineNum else origLineNum
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(start = 2.dp, end = 4.dp)
+                                            .width(singleLineNumColWidth),
+                                        contentAlignment = Alignment.CenterEnd
+                                    ) {
+                                        Text(
+                                            text = singleLineText,
+                                            color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color(0xFF9CA3AF),
+                                            fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
+                                            style = monoLineNumStyle,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Clip
+                                        )
+                                    }
                                 }
-
-                                // Prefix indicator (+, -, or space)
-                                Text(
-                                    text = prefix,
-                                    color = prefixColor,
-                                    style = monoCodeStyle.copy(fontWeight = FontWeight.Bold),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    modifier = Modifier
-                                        .width((fontSizeSp * 0.85f).coerceIn(8f, 18f).dp)
-                                        .padding(start = 1.dp)
-                                )
                             }
+
+                            // Prefix indicator (+, -, or space)
+                            Text(
+                                text = prefix,
+                                color = prefixColor,
+                                style = monoCodeStyle.copy(fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier
+                                    .width((fontSizeSp * 0.85f).coerceIn(8f, 18f).dp)
+                                    .padding(start = 1.dp)
+                            )
 
                             // Line text content
                             val rawText = item.value
@@ -418,41 +409,36 @@ fun UnifiedDiffView(
 
             // Horizontal Bottom Scroll Indicator (MT Manager style)
             if (!lineWrap && horizontalScrollState.maxValue > 0) {
-                DisableSelection {
-                    HorizontalScrollBar(
-                        scrollState = horizontalScrollState,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .fillMaxWidth()
-                            .padding(
-                                start = if (showLineNumbers) (totalLineNumGutterWidth + 18.dp) else 18.dp,
-                                end = 34.dp,
-                                bottom = 2.dp
-                            )
-                    )
-                }
-            }
-
-            DisableSelection {
-                MinimapScrollbar(
-                    listState = listState,
-                    items = diffLines,
+                HorizontalScrollBar(
+                    scrollState = horizontalScrollState,
                     modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .fillMaxHeight(),
-                    colorSelector = { item ->
-                        when (item.type) {
-                            DiffType.INSERT -> Color(0xFF2E7D32)
-                            DiffType.DELETE -> Color(0xFFC62828)
-                            DiffType.MODIFIED -> Color(0xFFEF6C00)
-                            DiffType.EQUAL -> null
-                        }
-                    }
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(
+                            start = if (showLineNumbers) (totalLineNumGutterWidth + 18.dp) else 18.dp,
+                            end = 34.dp,
+                            bottom = 2.dp
+                        )
                 )
             }
+
+            MinimapScrollbar(
+                listState = listState,
+                items = diffLines,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight(),
+                colorSelector = { item ->
+                    when (item.type) {
+                        DiffType.INSERT -> Color(0xFF2E7D32)
+                        DiffType.DELETE -> Color(0xFFC62828)
+                        DiffType.MODIFIED -> Color(0xFFEF6C00)
+                        DiffType.EQUAL -> null
+                    }
+                }
+            )
         }
     }
-}
 
 @Composable
 fun HorizontalScrollBar(
