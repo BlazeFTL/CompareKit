@@ -1105,16 +1105,21 @@ fun FileCompareScreen(
                     .background(MaterialTheme.colorScheme.background)
                     .pointerInput(Unit) {
                         awaitPointerEventScope {
+                            var lastZoomUpdate = 0L
                             while (true) {
                                 val event = awaitPointerEvent()
                                 if (event.changes.size > 1) {
                                     val zoomFactor = event.calculateZoom()
                                     if (zoomFactor != 1f) {
-                                        val newFontSize = (fontSize * zoomFactor).coerceIn(4f, 40f)
-                                        fontSize = newFontSize
-                                        // Also dynamically adjust line height multiplier along with font size
-                                        val newMultiplier = (lineHeightMultiplier * (1f + (zoomFactor - 1f) * 0.35f)).coerceIn(0.50f, 2.20f)
-                                        viewModel.setLineHeightMultiplier(newMultiplier)
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastZoomUpdate > 32) {
+                                            val newFontSize = (fontSize * zoomFactor).coerceIn(4f, 40f)
+                                            fontSize = newFontSize
+                                            // Also dynamically adjust line height multiplier along with font size
+                                            val newMultiplier = (lineHeightMultiplier * (1f + (zoomFactor - 1f) * 0.35f)).coerceIn(0.50f, 2.20f)
+                                            viewModel.setLineHeightMultiplier(newMultiplier)
+                                            lastZoomUpdate = now
+                                        }
                                         event.changes.forEach { it.consume() }
                                     }
                                 }

@@ -115,27 +115,31 @@ fun UnifiedDiffView(
     val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).dp
     val verticalLinePadding = (fontSizeSp * 0.08f * lineHeightMultiplier).coerceAtLeast(0.5f).dp
 
-    val monoCodeStyle = TextStyle(
-        fontSize = fontSizeSp.sp,
-        fontFamily = FontFamily.Monospace,
-        lineHeight = effectiveLineHeight,
-        lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
-            alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
-        ),
-        platformStyle = PlatformTextStyle(includeFontPadding = false)
-    )
+    val monoCodeStyle = remember(fontSizeSp, effectiveLineHeight) {
+        TextStyle(
+            fontSize = fontSizeSp.sp,
+            fontFamily = FontFamily.Monospace,
+            lineHeight = effectiveLineHeight,
+            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
+            ),
+            platformStyle = PlatformTextStyle(includeFontPadding = false)
+        )
+    }
 
-    val monoLineNumStyle = TextStyle(
-        fontSize = effectiveLineNumFontSize.sp,
-        fontFamily = FontFamily.Monospace,
-        lineHeight = effectiveLineHeight,
-        lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
-            alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
-        ),
-        platformStyle = PlatformTextStyle(includeFontPadding = false)
-    )
+    val monoLineNumStyle = remember(effectiveLineNumFontSize, effectiveLineHeight) {
+        TextStyle(
+            fontSize = effectiveLineNumFontSize.sp,
+            fontFamily = FontFamily.Monospace,
+            lineHeight = effectiveLineHeight,
+            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
+            ),
+            platformStyle = PlatformTextStyle(includeFontPadding = false)
+        )
+    }
 
     val isDarkMode = MaterialTheme.colorScheme.surface.let { (it.red + it.green + it.blue) / 3f < 0.5f }
 
@@ -193,7 +197,24 @@ fun UnifiedDiffView(
             ) {
                 itemsIndexed(
                     items = diffLines,
-                    key = { index, _ -> index }
+                    key = { index, _ -> index },
+                    contentType = { index, item ->
+                        val hasBanner = if (index == 0) {
+                            val startOrig = item.originalIndex ?: 0
+                            val startRev = item.revisedIndex ?: 0
+                            maxOf(startOrig, startRev) > 0
+                        } else {
+                            val prevItem = diffLines[index - 1]
+                            val origGap = if (item.originalIndex != null && prevItem.originalIndex != null) {
+                                item.originalIndex - prevItem.originalIndex - 1
+                            } else 0
+                            val revGap = if (item.revisedIndex != null && prevItem.revisedIndex != null) {
+                                item.revisedIndex - prevItem.revisedIndex - 1
+                            } else 0
+                            maxOf(origGap, revGap) > 0
+                        }
+                        item.type to hasBanner
+                    }
                 ) { index, item ->
                     // Calculate any collapsed banner before line
                     val bannerCount = if (index == 0) {
@@ -234,14 +255,7 @@ fun UnifiedDiffView(
 
                     val isActiveLine = index in activeBlockLineRange
 
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        if (bannerCount > 0) {
-                            CollapsedLinesBanner(
-                                count = bannerCount,
-                                label = if (index == 0) "at start" else null
-                            )
-                        }
-
+                    val rowContent = @Composable {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -379,6 +393,18 @@ fun UnifiedDiffView(
                                     .padding(start = 2.dp, end = 8.dp)
                             )
                         }
+                    }
+
+                    if (bannerCount > 0) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            CollapsedLinesBanner(
+                                count = bannerCount,
+                                label = if (index == 0) "at start" else null
+                            )
+                            rowContent()
+                        }
+                    } else {
+                        rowContent()
                     }
                 }
             }

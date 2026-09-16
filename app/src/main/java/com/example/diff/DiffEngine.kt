@@ -1,9 +1,12 @@
 package com.example.diff
 
+import androidx.compose.runtime.Immutable
+
 enum class DiffType {
     EQUAL, INSERT, DELETE, MODIFIED
 }
 
+@Immutable
 data class DiffItem<T>(
     val type: DiffType,
     val value: T,
@@ -13,6 +16,7 @@ data class DiffItem<T>(
     val subHighlights: List<SubRange>? = null
 )
 
+@Immutable
 data class SubRange(
     val start: Int,
     val end: Int

@@ -38,6 +38,15 @@ jobs:
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
+      - name: Create .env.example if missing
+        run: |
+          if [ ! -f ".env.example" ]; then
+            touch .env.example
+          fi
+          if [ ! -f ".env" ]; then
+            touch .env
+          fi
+
       - name: Patch build.gradle.kts
         run: |
           python3 - <<'EOF'

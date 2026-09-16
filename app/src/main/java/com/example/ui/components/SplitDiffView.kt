@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +38,7 @@ import com.example.diff.DiffItem
 import com.example.diff.DiffType
 import com.example.diff.SyntaxHighlighter
 
+@Immutable
 data class SplitLineRow(
     val leftItem: DiffItem<String>?,
     val rightItem: DiffItem<String>?,
@@ -169,18 +171,12 @@ fun SplitDiffView(
             ) {
                 itemsIndexed(
                     items = splitRows,
-                    key = { rowIndex, _ -> rowIndex }
-                ) { rowIndex, row ->
-                        // Visual banner for collapsed lines in between distant changes or at start
-                        if (rowIndex == 0) {
+                    key = { rowIndex, _ -> rowIndex },
+                    contentType = { rowIndex, row ->
+                        val hasBanner = if (rowIndex == 0) {
                             val startOrig = row.leftItem?.originalIndex ?: 0
                             val startRev = row.rightItem?.revisedIndex ?: 0
-                            val leadingHidden = maxOf(startOrig, startRev)
-                            if (leadingHidden > 0) {
-                                DisableSelection {
-                                    CollapsedLinesBanner(count = leadingHidden, label = "at start")
-                                }
-                            }
+                            maxOf(startOrig, startRev) > 0
                         } else {
                             val prevRow = splitRows[rowIndex - 1]
                             val origGap = if (row.leftItem?.originalIndex != null && prevRow.leftItem?.originalIndex != null) {
@@ -189,17 +185,31 @@ fun SplitDiffView(
                             val revGap = if (row.rightItem?.revisedIndex != null && prevRow.rightItem?.revisedIndex != null) {
                                 row.rightItem.revisedIndex - prevRow.rightItem.revisedIndex - 1
                             } else 0
-                            val gapCount = maxOf(origGap, revGap)
-                            if (gapCount > 0) {
-                                DisableSelection {
-                                    CollapsedLinesBanner(count = gapCount)
-                                }
-                            }
+                            maxOf(origGap, revGap) > 0
                         }
+                        (row.leftItem?.type to row.rightItem?.type) to hasBanner
+                    }
+                ) { rowIndex, row ->
+                    // Visual banner for collapsed lines in between distant changes or at start
+                    val gapCount = if (rowIndex == 0) {
+                        val startOrig = row.leftItem?.originalIndex ?: 0
+                        val startRev = row.rightItem?.revisedIndex ?: 0
+                        maxOf(startOrig, startRev)
+                    } else {
+                        val prevRow = splitRows[rowIndex - 1]
+                        val origGap = if (row.leftItem?.originalIndex != null && prevRow.leftItem?.originalIndex != null) {
+                            row.leftItem.originalIndex - prevRow.leftItem.originalIndex - 1
+                        } else 0
+                        val revGap = if (row.rightItem?.revisedIndex != null && prevRow.rightItem?.revisedIndex != null) {
+                            row.rightItem.revisedIndex - prevRow.rightItem.revisedIndex - 1
+                        } else 0
+                        maxOf(origGap, revGap)
+                    }
 
-                        val isLeftActive = row.leftIndex != -1 && row.leftIndex in activeBlockLineRange
-                        val isRightActive = row.rightIndex != -1 && row.rightIndex in activeBlockLineRange
+                    val isLeftActive = row.leftIndex != -1 && row.leftIndex in activeBlockLineRange
+                    val isRightActive = row.rightIndex != -1 && row.rightIndex in activeBlockLineRange
 
+                    val rowContent = @Composable {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -254,6 +264,21 @@ fun SplitDiffView(
                             }
                         }
                     }
+
+                    if (gapCount > 0) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            DisableSelection {
+                                CollapsedLinesBanner(
+                                    count = gapCount,
+                                    label = if (rowIndex == 0) "at start" else null
+                                )
+                            }
+                            rowContent()
+                        }
+                    } else {
+                        rowContent()
+                    }
+                }
                 }
             }
 
@@ -358,27 +383,31 @@ private fun CellView(
     val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).dp
     val verticalLinePadding = (fontSizeSp * 0.08f * lineHeightMultiplier).coerceAtLeast(0.5f).dp
 
-    val monoCodeStyle = TextStyle(
-        fontSize = fontSizeSp.sp,
-        fontFamily = FontFamily.Monospace,
-        lineHeight = effectiveLineHeight,
-        lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
-            alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
-        ),
-        platformStyle = PlatformTextStyle(includeFontPadding = false)
-    )
+    val monoCodeStyle = remember(fontSizeSp, effectiveLineHeight) {
+        TextStyle(
+            fontSize = fontSizeSp.sp,
+            fontFamily = FontFamily.Monospace,
+            lineHeight = effectiveLineHeight,
+            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
+            ),
+            platformStyle = PlatformTextStyle(includeFontPadding = false)
+        )
+    }
 
-    val monoLineNumStyle = TextStyle(
-        fontSize = effectiveLineNumFontSize.sp,
-        fontFamily = FontFamily.Monospace,
-        lineHeight = effectiveLineHeight,
-        lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
-            alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-            trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
-        ),
-        platformStyle = PlatformTextStyle(includeFontPadding = false)
-    )
+    val monoLineNumStyle = remember(effectiveLineNumFontSize, effectiveLineHeight) {
+        TextStyle(
+            fontSize = effectiveLineNumFontSize.sp,
+            fontFamily = FontFamily.Monospace,
+            lineHeight = effectiveLineHeight,
+            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
+            ),
+            platformStyle = PlatformTextStyle(includeFontPadding = false)
+        )
+    }
 
     Row(
         modifier = Modifier
