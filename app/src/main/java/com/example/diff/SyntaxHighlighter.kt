@@ -18,7 +18,7 @@ object SyntaxHighlighter {
     private val ATTR_COLOR = Color(0xFF3F51B5)    // Indigo
 
     // High-performance LRU Cache for rendered syntax lines
-    private val cache = LruCache<String, AnnotatedString>(16384)
+    private val cache = LruCache<String, AnnotatedString>(32768)
 
     // Precompiled static Regex instances
     private val JSON_STRING_REGEX = "\"[^\"]*\"".toRegex()
@@ -40,17 +40,45 @@ object SyntaxHighlighter {
     private val SMALI_COMMENT_REGEX = "#.*".toRegex()
     private val SMALI_NUMBER_REGEX = "-?0x[0-9a-fA-F]+L?|-?\\d+L?".toRegex()
 
+    fun prewarm(lines: List<String>, filename: String) {
+        if (lines.isEmpty()) return
+        val ext = filename.lowercase().substringAfterLast('.', "")
+        val isKnownExt = ext in setOf("json", "xml", "html", "htm", "js", "ts", "kt", "java", "css", "smali", "dex")
+        val forceSmali = filename.equals("smali", ignoreCase = true) || (!isKnownExt && lines.any { it.startsWith(".class") || it.startsWith(".method") || it.contains("invoke-") })
+        val targetExt = if (forceSmali) "smali" else if (isKnownExt) ext else null
+        if (targetExt == null) return
+
+        val limit = minOf(lines.size, 8000)
+        for (i in 0 until limit) {
+            val text = lines[i]
+            if (text.isNotEmpty()) {
+                val cacheKey = "$targetExt:$text"
+                if (cache.get(cacheKey) == null) {
+                    val highlighted = when (targetExt) {
+                        "json" -> highlightJson(text)
+                        "xml", "html", "htm" -> highlightXmlHtml(text)
+                        "smali", "dex" -> highlightSmali(text)
+                        "js", "ts", "kt", "java", "css" -> highlightCode(text)
+                        else -> AnnotatedString(text)
+                    }
+                    cache.put(cacheKey, highlighted)
+                }
+            }
+        }
+    }
+
     fun highlight(text: String, filename: String): AnnotatedString {
         if (text.isEmpty()) return AnnotatedString("")
         val ext = filename.lowercase().substringAfterLast('.', "")
         val isKnownExt = ext in setOf("json", "xml", "html", "htm", "js", "ts", "kt", "java", "css", "smali", "dex")
+        val isSmaliFile = filename.equals("smali", ignoreCase = true) || ext == "smali" || ext == "dex"
         val looksLikeSmali = !isKnownExt && (
             text.startsWith(".") || text.startsWith("#") || text.contains("const-string") ||
             text.contains("invoke-") || text.contains(".method") || text.contains(".class") ||
             text.contains("goto") || text.contains("return")
         )
 
-        val targetExt = if (isKnownExt) ext else if (looksLikeSmali) "smali" else null
+        val targetExt = if (isSmaliFile) "smali" else if (isKnownExt) ext else if (looksLikeSmali) "smali" else null
         if (targetExt == null) {
             return AnnotatedString(text)
         }

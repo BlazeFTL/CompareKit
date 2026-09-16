@@ -239,10 +239,10 @@ fun CompareTreeView(
     }
 
     var localExpandedPaths by remember(rootFolder) {
-        mutableStateOf<Set<String>>(emptySet())
+        mutableStateOf<Set<String>>(TreeHelper.collectAllFolderPaths(rootFolder))
     }
 
-    val currentExpandedPaths = expandedPaths ?: localExpandedPaths
+    val currentExpandedPaths = if (!expandedPaths.isNullOrEmpty()) expandedPaths else localExpandedPaths
 
     val updateExpanded: (Set<String>) -> Unit = { newPaths ->
         localExpandedPaths = newPaths

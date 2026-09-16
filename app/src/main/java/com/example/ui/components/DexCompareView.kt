@@ -60,7 +60,21 @@ fun DexCompareView(
     val hideModified by viewModel.hideModifiedDexClasses.collectAsState()
     val dexCompareOptions by viewModel.dexCompareOptions.collectAsState()
 
-    var expandedPaths by remember { mutableStateOf(setOf<String>()) }
+    // Compute all package paths for all classes to auto-expand by default as much as possible
+    val allPackagePaths = remember(dexClasses) {
+        val paths = mutableSetOf<String>()
+        dexClasses.forEach { item ->
+            val parts = item.className.split('.')
+            var current = ""
+            for (i in 0 until parts.size - 1) {
+                current = if (current.isEmpty()) parts[i] else "$current.${parts[i]}"
+                paths.add(current)
+            }
+        }
+        paths.toSet()
+    }
+
+    var expandedPaths by remember(allPackagePaths) { mutableStateOf<Set<String>>(allPackagePaths) }
     val selectedClassForDetail by viewModel.selectedDexClassDetail.collectAsState()
 
     BackHandler(enabled = selectedClassForDetail != null) {
@@ -88,11 +102,11 @@ fun DexCompareView(
         }
     }
 
-    // Auto-expand packages initially when non-unchanged classes are first loaded
+    // Auto-expand packages initially when classes are first loaded
     LaunchedEffect(dexClasses) {
         if (dexClasses.isNotEmpty()) {
             val pathsToExpand = mutableSetOf<String>()
-            dexClasses.filter { it.status != DexStatus.UNCHANGED }.forEach { item ->
+            dexClasses.forEach { item ->
                 val parts = item.className.split('.')
                 var current = ""
                 for (i in 0 until parts.size - 1) {

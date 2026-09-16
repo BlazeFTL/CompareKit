@@ -34,6 +34,7 @@ fun <T> MinimapScrollbar(
 ) {
     val coroutineScope = rememberCoroutineScope()
     var trackHeight by remember { mutableStateOf(0f) }
+    var scrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     // Precompute merged tick ranges ONCE when items change.
     // This turns thousands of loop iterations and per-frame object allocations into drawing
@@ -91,7 +92,8 @@ fun <T> MinimapScrollbar(
         if (trackHeight > 0 && items.isNotEmpty()) {
             val ratio = (yOffset / trackHeight).coerceIn(0f, 1f)
             val targetIndex = (ratio * items.size).toInt().coerceIn(0, items.size - 1)
-            coroutineScope.launch {
+            scrollJob?.cancel()
+            scrollJob = coroutineScope.launch {
                 listState.scrollToItem(targetIndex)
             }
         }

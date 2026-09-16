@@ -22,6 +22,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
@@ -30,6 +33,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -135,6 +139,35 @@ fun UnifiedDiffView(
 
     val isDarkMode = MaterialTheme.colorScheme.surface.let { (it.red + it.green + it.blue) / 3f < 0.5f }
 
+    val insertBg = remember(isDarkMode) { if (isDarkMode) Color(0xFF132D20) else Color(0xFFE6F4EA) }
+    val insertPrefixColor = remember(isDarkMode) { if (isDarkMode) Color(0xFF4ADE80) else Color(0xFF0F5132) }
+    val insertTextColor = remember(isDarkMode) { if (isDarkMode) Color(0xFF86EFAC) else Color(0xFF0F5132) }
+
+    val deleteBg = remember(isDarkMode) { if (isDarkMode) Color(0xFF381518) else Color(0xFFFDE8E8) }
+    val deletePrefixColor = remember(isDarkMode) { if (isDarkMode) Color(0xFFF87171) else Color(0xFF991B1B) }
+    val deleteTextColor = remember(isDarkMode) { if (isDarkMode) Color(0xFFFCA5A5) else Color(0xFF991B1B) }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val lineNumInactiveColor = Color(0xFF9CA3AF)
+
+    val insertCodeStyle = remember(monoCodeStyle, insertTextColor) { monoCodeStyle.copy(color = insertTextColor) }
+    val deleteCodeStyle = remember(monoCodeStyle, deleteTextColor) { monoCodeStyle.copy(color = deleteTextColor) }
+    val normalCodeStyle = remember(monoCodeStyle, onSurfaceColor) { monoCodeStyle.copy(color = onSurfaceColor) }
+    val prefixBoldStyle = remember(monoCodeStyle) { monoCodeStyle.copy(fontWeight = FontWeight.Bold) }
+    val prefixWidth = remember(fontSizeSp) { (fontSizeSp * 0.85f).coerceIn(8f, 18f).dp }
+
+    val minimapColorSelector: (DiffItem<String>) -> Color? = remember {
+        { item ->
+            when (item.type) {
+                DiffType.INSERT -> Color(0xFF2E7D32)
+                DiffType.DELETE -> Color(0xFFC62828)
+                DiffType.MODIFIED -> Color(0xFFEF6C00)
+                DiffType.EQUAL -> null
+            }
+        }
+    }
+
     Box(
         modifier = modifier.fillMaxSize()
     ) {
@@ -162,14 +195,11 @@ fun UnifiedDiffView(
                     items = diffLines,
                     key = { index, _ -> index }
                 ) { index, item ->
-                    // Visual banner for collapsed lines in between distant changes or at start
-                    if (index == 0) {
+                    // Calculate any collapsed banner before line
+                    val bannerCount = if (index == 0) {
                         val startOrig = item.originalIndex ?: 0
                         val startRev = item.revisedIndex ?: 0
-                        val leadingHidden = maxOf(startOrig, startRev)
-                        if (leadingHidden > 0) {
-                            CollapsedLinesBanner(count = leadingHidden, label = "at start")
-                        }
+                        maxOf(startOrig, startRev)
                     } else {
                         val prevItem = diffLines[index - 1]
                         val origGap = if (item.originalIndex != null && prevItem.originalIndex != null) {
@@ -178,133 +208,105 @@ fun UnifiedDiffView(
                         val revGap = if (item.revisedIndex != null && prevItem.revisedIndex != null) {
                             item.revisedIndex - prevItem.revisedIndex - 1
                         } else 0
-                        val gapCount = maxOf(origGap, revGap)
-                        if (gapCount > 0) {
-                            CollapsedLinesBanner(count = gapCount)
-                        }
+                        maxOf(origGap, revGap)
                     }
 
-                        val (bgColor, prefixColor, textColor) = when (item.type) {
-                            DiffType.INSERT -> {
-                                if (isDarkMode) {
-                                    Triple(Color(0xFF132D20), Color(0xFF4ADE80), Color(0xFF86EFAC))
-                                } else {
-                                    Triple(Color(0xFFE6F4EA), Color(0xFF0F5132), Color(0xFF0F5132))
-                                }
+                    val itemType = item.type
+                    val (bgColor, prefixColor, textStyle) = when (itemType) {
+                        DiffType.INSERT -> Triple(insertBg, insertPrefixColor, insertCodeStyle)
+                        DiffType.DELETE -> Triple(deleteBg, deletePrefixColor, deleteCodeStyle)
+                        DiffType.MODIFIED -> {
+                            if (item.originalIndex != null) {
+                                Triple(deleteBg, deletePrefixColor, deleteCodeStyle)
+                            } else {
+                                Triple(insertBg, insertPrefixColor, insertCodeStyle)
                             }
-                            DiffType.DELETE -> {
-                                if (isDarkMode) {
-                                    Triple(Color(0xFF381518), Color(0xFFF87171), Color(0xFFFCA5A5))
-                                } else {
-                                    Triple(Color(0xFFFDE8E8), Color(0xFF991B1B), Color(0xFF991B1B))
-                                }
-                            }
-                            DiffType.MODIFIED -> {
-                                if (item.originalIndex != null) {
-                                    if (isDarkMode) {
-                                        Triple(Color(0xFF381518), Color(0xFFF87171), Color(0xFFFCA5A5))
-                                    } else {
-                                        Triple(Color(0xFFFDE8E8), Color(0xFF991B1B), Color(0xFF991B1B))
-                                    }
-                                } else {
-                                    if (isDarkMode) {
-                                        Triple(Color(0xFF132D20), Color(0xFF4ADE80), Color(0xFF86EFAC))
-                                    } else {
-                                        Triple(Color(0xFFE6F4EA), Color(0xFF0F5132), Color(0xFF0F5132))
-                                    }
-                                }
-                            }
-                            DiffType.EQUAL -> Triple(Color.Transparent, Color(0xFF9CA3AF), MaterialTheme.colorScheme.onSurface)
                         }
+                        DiffType.EQUAL -> Triple(Color.Transparent, lineNumInactiveColor, normalCodeStyle)
+                    }
 
-                        // Prefix character
-                        val prefix = when (item.type) {
-                            DiffType.INSERT -> "+"
-                            DiffType.DELETE -> "-"
-                            DiffType.MODIFIED -> if (item.originalIndex != null) "-" else "+"
-                            DiffType.EQUAL -> " "
+                    val prefix = when (itemType) {
+                        DiffType.INSERT -> "+"
+                        DiffType.DELETE -> "-"
+                        DiffType.MODIFIED -> if (item.originalIndex != null) "-" else "+"
+                        DiffType.EQUAL -> " "
+                    }
+
+                    val isActiveLine = index in activeBlockLineRange
+
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        if (bannerCount > 0) {
+                            CollapsedLinesBanner(
+                                count = bannerCount,
+                                label = if (index == 0) "at start" else null
+                            )
                         }
-
-                        val origLineNum = item.originalIndex?.plus(1)?.toString() ?: ""
-                        val revLineNum = item.revisedIndex?.plus(1)?.toString() ?: ""
-
-                        val isActiveLine = index in activeBlockLineRange
 
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(bgColor)
+                                .drawBehind {
+                                    if (isActiveLine) {
+                                        drawRect(
+                                            color = primaryColor,
+                                            topLeft = Offset.Zero,
+                                            size = Size(3.dp.toPx(), size.height)
+                                        )
+                                    }
+                                }
                                 .defaultMinSize(minHeight = minLineRowHeight)
                                 .padding(vertical = verticalLinePadding),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Accent bar for active change blocks
-                            Box(
-                                modifier = Modifier
-                                    .width(3.dp)
-                                    .height(minLineRowHeight)
-                                    .background(if (isActiveLine) MaterialTheme.colorScheme.primary else Color.Transparent)
-                            )
-
+                            // Gutter line numbers
                             if (showLineNumbers) {
+                                val origLineNum = item.originalIndex?.plus(1)?.toString() ?: ""
+                                val revLineNum = item.revisedIndex?.plus(1)?.toString() ?: ""
+                                val numColor = if (isActiveLine) primaryColor else lineNumInactiveColor
+                                val numWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal
+
                                 if (isDualLineNumbers) {
-                                    // Compact dual line numbers with minimal gap between them
                                     Row(
-                                        modifier = Modifier.padding(start = 2.dp, end = 4.dp),
+                                        modifier = Modifier.padding(start = 4.dp, end = 4.dp),
                                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // Original file line number (left)
-                                        Box(
-                                            modifier = Modifier.width(singleLineNumColWidth),
-                                            contentAlignment = Alignment.CenterEnd
-                                        ) {
-                                            Text(
-                                                text = origLineNum,
-                                                color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color(0xFF9CA3AF),
-                                                fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
-                                                style = monoLineNumStyle,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                overflow = TextOverflow.Clip
-                                            )
-                                        }
-
-                                        // Revised file line number (right)
-                                        Box(
-                                            modifier = Modifier.width(singleLineNumColWidth),
-                                            contentAlignment = Alignment.CenterEnd
-                                        ) {
-                                            Text(
-                                                text = revLineNum,
-                                                color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color(0xFF9CA3AF),
-                                                fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
-                                                style = monoLineNumStyle,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                overflow = TextOverflow.Clip
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    // Single line number column for new files or deleted files - No wasted left gap!
-                                    val singleLineText = if (hasRevised) revLineNum else origLineNum
-                                    Box(
-                                        modifier = Modifier
-                                            .padding(start = 2.dp, end = 4.dp)
-                                            .width(singleLineNumColWidth),
-                                        contentAlignment = Alignment.CenterEnd
-                                    ) {
                                         Text(
-                                            text = singleLineText,
-                                            color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color(0xFF9CA3AF),
-                                            fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
+                                            text = origLineNum,
+                                            color = numColor,
+                                            fontWeight = numWeight,
                                             style = monoLineNumStyle,
                                             maxLines = 1,
                                             softWrap = false,
-                                            overflow = TextOverflow.Clip
+                                            textAlign = TextAlign.End,
+                                            modifier = Modifier.width(singleLineNumColWidth)
+                                        )
+                                        Text(
+                                            text = revLineNum,
+                                            color = numColor,
+                                            fontWeight = numWeight,
+                                            style = monoLineNumStyle,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            textAlign = TextAlign.End,
+                                            modifier = Modifier.width(singleLineNumColWidth)
                                         )
                                     }
+                                } else {
+                                    val singleLineText = if (hasRevised) revLineNum else origLineNum
+                                    Text(
+                                        text = singleLineText,
+                                        color = numColor,
+                                        fontWeight = numWeight,
+                                        style = monoLineNumStyle,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        textAlign = TextAlign.End,
+                                        modifier = Modifier
+                                            .padding(start = 4.dp, end = 4.dp)
+                                            .width(singleLineNumColWidth)
+                                    )
                                 }
                             }
 
@@ -312,18 +314,16 @@ fun UnifiedDiffView(
                             Text(
                                 text = prefix,
                                 color = prefixColor,
-                                style = monoCodeStyle.copy(fontWeight = FontWeight.Bold),
+                                style = prefixBoldStyle,
                                 maxLines = 1,
                                 softWrap = false,
-                                modifier = Modifier
-                                    .width((fontSizeSp * 0.85f).coerceIn(8f, 18f).dp)
-                                    .padding(start = 1.dp)
+                                modifier = Modifier.width(prefixWidth)
                             )
 
                             // Line text content
                             val rawText = item.value
-                            val baseAnnotatedText = remember(rawText, filename, item.type, item.subHighlights) {
-                                if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
+                            val baseAnnotatedText = remember(rawText, filename, itemType, item.subHighlights) {
+                                if (itemType == DiffType.MODIFIED && item.subHighlights != null) {
                                     buildAnnotatedString {
                                         append(rawText)
                                         item.subHighlights.forEach { range ->
@@ -332,11 +332,7 @@ fun UnifiedDiffView(
                                             if (start < end) {
                                                 addStyle(
                                                     style = SpanStyle(
-                                                        background = if (item.originalIndex != null) {
-                                                            Color(0xFFFFCC80) // Amber highlight
-                                                        } else {
-                                                            Color(0xFF90CAF9) // Blue/Cyan highlight
-                                                        },
+                                                        background = if (item.originalIndex != null) Color(0xFFFFCC80) else Color(0xFF90CAF9),
                                                         fontWeight = FontWeight.Bold
                                                     ),
                                                     start = start,
@@ -351,7 +347,7 @@ fun UnifiedDiffView(
                             }
 
                             val annotatedText = remember(baseAnnotatedText, searchQuery, rawText) {
-                                if (searchQuery.isNotEmpty()) {
+                                if (searchQuery.isNotEmpty() && rawText.contains(searchQuery, ignoreCase = true)) {
                                     buildAnnotatedString {
                                         append(baseAnnotatedText)
                                         var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
@@ -374,71 +370,45 @@ fun UnifiedDiffView(
                                 }
                             }
 
-                            // Compute hanging indentation so wrapped lines align cleanly below statements (e.g. below `invoke`)
-                            val leadingSpaceCount = remember(rawText) { rawText.takeWhile { it == ' ' }.length }
-                            val indentCharCount = if (leadingSpaceCount > 0) leadingSpaceCount else 4
-                            val restLineIndentSp = (fontSizeSp * 0.60f * indentCharCount).sp
-
-                            val finalCodeStyle = if (item.type == DiffType.INSERT || item.type == DiffType.DELETE) {
-                                monoCodeStyle.copy(
-                                    color = textColor,
-                                    textIndent = if (lineWrap) TextIndent(firstLine = 0.sp, restLine = restLineIndentSp) else TextIndent.None
-                                )
-                            } else {
-                                monoCodeStyle.copy(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    textIndent = if (lineWrap) TextIndent(firstLine = 0.sp, restLine = restLineIndentSp) else TextIndent.None
-                                )
-                            }
-
-                            Box(
+                            Text(
+                                text = annotatedText,
+                                style = textStyle,
+                                softWrap = lineWrap,
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .padding(start = 2.dp, end = 12.dp)
-                            ) {
-                                Text(
-                                    text = annotatedText,
-                                    style = finalCodeStyle,
-                                    softWrap = lineWrap
-                                )
-                            }
+                                    .fillMaxWidth()
+                                    .padding(start = 2.dp, end = 8.dp)
+                            )
                         }
                     }
                 }
             }
+        }
 
-            // Horizontal Bottom Scroll Indicator (MT Manager style)
-            if (!lineWrap && horizontalScrollState.maxValue > 0) {
-                HorizontalScrollBar(
-                    scrollState = horizontalScrollState,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .fillMaxWidth()
-                        .padding(
-                            start = if (showLineNumbers) (totalLineNumGutterWidth + 18.dp) else 18.dp,
-                            end = 34.dp,
-                            bottom = 2.dp
-                        )
-                )
-            }
-
-            MinimapScrollbar(
-                listState = listState,
-                items = diffLines,
+        // Horizontal Bottom Scroll Indicator (MT Manager style)
+        if (!lineWrap && horizontalScrollState.maxValue > 0) {
+            HorizontalScrollBar(
+                scrollState = horizontalScrollState,
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxHeight(),
-                colorSelector = { item ->
-                    when (item.type) {
-                        DiffType.INSERT -> Color(0xFF2E7D32)
-                        DiffType.DELETE -> Color(0xFFC62828)
-                        DiffType.MODIFIED -> Color(0xFFEF6C00)
-                        DiffType.EQUAL -> null
-                    }
-                }
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(
+                        start = if (showLineNumbers) (totalLineNumGutterWidth + 18.dp) else 18.dp,
+                        end = 34.dp,
+                        bottom = 2.dp
+                    )
             )
         }
+
+        MinimapScrollbar(
+            listState = listState,
+            items = diffLines,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight(),
+            colorSelector = minimapColorSelector
+        )
     }
+}
 
 @Composable
 fun HorizontalScrollBar(

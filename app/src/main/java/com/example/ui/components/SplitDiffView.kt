@@ -39,38 +39,40 @@ import com.example.diff.SyntaxHighlighter
 
 data class SplitLineRow(
     val leftItem: DiffItem<String>?,
-    val rightItem: DiffItem<String>?
+    val rightItem: DiffItem<String>?,
+    val leftIndex: Int = -1,
+    val rightIndex: Int = -1
 )
 
 object SplitAligner {
     fun align(diffLines: List<DiffItem<String>>): List<SplitLineRow> {
-        val result = ArrayList<SplitLineRow>()
+        val result = ArrayList<SplitLineRow>(diffLines.size)
         var i = 0
         val size = diffLines.size
 
         while (i < size) {
             val current = diffLines[i]
             if (current.type == DiffType.EQUAL) {
-                result.add(SplitLineRow(current, current))
+                result.add(SplitLineRow(current, current, i, i))
                 i++
             } else if (current.type == DiffType.MODIFIED) {
                 if (i < size - 1 && diffLines[i + 1].type == DiffType.MODIFIED) {
-                    result.add(SplitLineRow(current, diffLines[i + 1]))
+                    result.add(SplitLineRow(current, diffLines[i + 1], i, i + 1))
                     i += 2
                 } else {
-                    result.add(SplitLineRow(current, null))
+                    result.add(SplitLineRow(current, null, i, -1))
                     i++
                 }
             } else if (current.type == DiffType.DELETE) {
                 if (i < size - 1 && diffLines[i + 1].type == DiffType.INSERT) {
-                    result.add(SplitLineRow(current, diffLines[i + 1]))
+                    result.add(SplitLineRow(current, diffLines[i + 1], i, i + 1))
                     i += 2
                 } else {
-                    result.add(SplitLineRow(current, null))
+                    result.add(SplitLineRow(current, null, i, -1))
                     i++
                 }
             } else if (current.type == DiffType.INSERT) {
-                result.add(SplitLineRow(null, current))
+                result.add(SplitLineRow(null, current, -1, i))
                 i++
             } else {
                 i++
@@ -195,10 +197,8 @@ fun SplitDiffView(
                             }
                         }
 
-                        val leftIndex = row.leftItem?.let { diffLines.indexOf(it) } ?: -1
-                        val rightIndex = row.rightItem?.let { diffLines.indexOf(it) } ?: -1
-                        val isLeftActive = leftIndex in activeBlockLineRange
-                        val isRightActive = rightIndex in activeBlockLineRange
+                        val isLeftActive = row.leftIndex != -1 && row.leftIndex in activeBlockLineRange
+                        val isRightActive = row.rightIndex != -1 && row.rightIndex in activeBlockLineRange
 
                         Row(
                             modifier = Modifier
@@ -268,13 +268,8 @@ fun SplitDiffView(
             )
         }
 
-        MinimapScrollbar(
-            listState = listState,
-            items = splitRows,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight(),
-            colorSelector = { row ->
+        val splitColorSelector: (SplitLineRow) -> Color? = remember {
+            { row ->
                 val type = row.leftItem?.type ?: row.rightItem?.type
                 when (type) {
                     DiffType.INSERT -> Color(0xFF2E7D32)
@@ -283,6 +278,15 @@ fun SplitDiffView(
                     else -> null
                 }
             }
+        }
+
+        MinimapScrollbar(
+            listState = listState,
+            items = splitRows,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight(),
+            colorSelector = splitColorSelector
         )
     }
 }

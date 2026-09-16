@@ -13,6 +13,7 @@ import com.example.diff.DiffOptions
 import com.example.diff.DiffType
 import com.example.diff.MyersDiff
 import com.example.diff.Prettier
+import com.example.diff.SyntaxHighlighter
 import com.example.file.FileCompareStatus
 import com.example.file.FileHelper
 import com.example.file.FileStatus
@@ -430,6 +431,17 @@ class CompareViewModel : ViewModel() {
                     _fileList.value = virtualSmaliList
                     _searchQuery.value = ""
                     _statusFilter.value = FileStatus.MODIFIED
+                    // Auto-expand all class packages as much as possible
+                    val allPaths = mutableSetOf<String>()
+                    for (item in virtualSmaliList) {
+                        val parts = item.relativePath.split('/')
+                        var current = ""
+                        for (i in 0 until parts.size - 1) {
+                            current = if (current.isEmpty()) parts[i] else "$current/${parts[i]}"
+                            allPaths.add(current)
+                        }
+                    }
+                    _treeExpandedPaths.value = allPaths
                     _compareProgress.value = 1.0f
                 } catch (e: Exception) {
                     _errorMessage.value = "Failed to parse DEX bytecode: ${e.localizedMessage}"
@@ -793,6 +805,16 @@ class CompareViewModel : ViewModel() {
                 }
                 _fileList.value = results
                 _hasRunComparison.value = true
+                val allPaths = mutableSetOf<String>()
+                for (item in results) {
+                    val parts = item.relativePath.split('/')
+                    var current = ""
+                    for (i in 0 until parts.size - 1) {
+                        current = if (current.isEmpty()) parts[i] else "$current/${parts[i]}"
+                        allPaths.add(current)
+                    }
+                }
+                _treeExpandedPaths.value = allPaths
             } catch (e: Exception) {
                 _errorMessage.value = "Error comparing archive: ${e.message}"
             } finally {
@@ -1121,9 +1143,18 @@ class CompareViewModel : ViewModel() {
                     _hasRunComparison.value = true
 
                     val isApk = isComparingApkFiles() || isDecompiledApkComparison()
+                    val allPaths = mutableSetOf<String>()
+                    for (item in comparison) {
+                        val parts = item.relativePath.split('/')
+                        var current = ""
+                        for (i in 0 until parts.size - 1) {
+                            current = if (current.isEmpty()) parts[i] else "$current/${parts[i]}"
+                            allPaths.add(current)
+                        }
+                    }
+                    _treeExpandedPaths.value = allPaths
                     if (isApk) {
                         _statusFilter.value = FileStatus.MODIFIED
-                        _treeExpandedPaths.value = emptySet()
                     } else {
                         _statusFilter.value = null
                     }
@@ -1198,10 +1229,19 @@ class CompareViewModel : ViewModel() {
                     _fileList.value = comparison
                     _hasRunComparison.value = true
 
-                    val isApk = isComparingApkFiles() || isDecompiledApkComparison()
-                    if (isApk) {
+                    val isApkDir = isComparingApkFiles() || isDecompiledApkComparison()
+                    val allDirPaths = mutableSetOf<String>()
+                    for (item in comparison) {
+                        val parts = item.relativePath.split('/')
+                        var current = ""
+                        for (i in 0 until parts.size - 1) {
+                            current = if (current.isEmpty()) parts[i] else "$current/${parts[i]}"
+                            allDirPaths.add(current)
+                        }
+                    }
+                    _treeExpandedPaths.value = allDirPaths
+                    if (isApkDir) {
                         _statusFilter.value = FileStatus.MODIFIED
-                        _treeExpandedPaths.value = emptySet()
                     } else {
                         _statusFilter.value = null
                     }
@@ -1505,6 +1545,7 @@ class CompareViewModel : ViewModel() {
                         }
 
                         val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                        SyntaxHighlighter.prewarm(diff.map { it.value }, "smali")
                         _diffLines.value = diff
                         val hasChanges = diff.any { it.type == DiffType.INSERT || it.type == DiffType.DELETE || it.type == DiffType.MODIFIED }
                         if (!hasChanges && fileStatus.status != FileStatus.UNCHANGED) {
@@ -1591,6 +1632,7 @@ class CompareViewModel : ViewModel() {
                         }
 
                         val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                        SyntaxHighlighter.prewarm(diff.map { it.value }, "xml")
                         _diffLines.value = diff
                     } else if (fileStatus.isBinary) {
                         _diffLines.value = emptyList()
@@ -1614,6 +1656,8 @@ class CompareViewModel : ViewModel() {
                         }
 
                         val diff = MyersDiff.diff(srcLines, modLines, _diffOptions.value)
+                        val ext = if (isSmali) "smali" else fileStatus.relativePath
+                        SyntaxHighlighter.prewarm(diff.map { it.value }, ext)
                         _diffLines.value = diff
                     }
                 } catch (e: Exception) {
