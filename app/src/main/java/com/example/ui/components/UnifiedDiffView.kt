@@ -275,51 +275,31 @@ fun UnifiedDiffView(
                         ) {
                             // Gutter line numbers
                             if (showLineNumbers) {
-                                val origLineNum = item.originalIndex?.plus(1)?.toString() ?: ""
-                                val revLineNum = item.revisedIndex?.plus(1)?.toString() ?: ""
                                 val numColor = if (isActiveLine) primaryColor else lineNumInactiveColor
                                 val numWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal
 
-                                if (isDualLineNumbers) {
-                                    Row(
-                                        modifier = Modifier.padding(start = 4.dp, end = 4.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = origLineNum,
-                                            color = numColor,
-                                            fontWeight = numWeight,
-                                            style = monoLineNumStyle,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            textAlign = TextAlign.End,
-                                            modifier = Modifier.width(singleLineNumColWidth)
-                                        )
-                                        Text(
-                                            text = revLineNum,
-                                            color = numColor,
-                                            fontWeight = numWeight,
-                                            style = monoLineNumStyle,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            textAlign = TextAlign.End,
-                                            modifier = Modifier.width(singleLineNumColWidth)
-                                        )
+                                val lineNumText = remember(item.originalIndex, item.revisedIndex, isDualLineNumbers, digitCount, hasRevised) {
+                                    if (isDualLineNumbers) {
+                                        val o = (item.originalIndex?.plus(1)?.toString() ?: "").padStart(digitCount)
+                                        val r = (item.revisedIndex?.plus(1)?.toString() ?: "").padStart(digitCount)
+                                        "$o $r"
+                                    } else {
+                                        (if (hasRevised) item.revisedIndex?.plus(1) else item.originalIndex?.plus(1))
+                                            ?.toString()?.padStart(digitCount) ?: ""
                                     }
-                                } else {
-                                    val singleLineText = if (hasRevised) revLineNum else origLineNum
+                                }
+
+                                DisableSelection {
                                     Text(
-                                        text = singleLineText,
+                                        text = lineNumText,
                                         color = numColor,
                                         fontWeight = numWeight,
                                         style = monoLineNumStyle,
                                         maxLines = 1,
                                         softWrap = false,
-                                        textAlign = TextAlign.End,
                                         modifier = Modifier
                                             .padding(start = 4.dp, end = 4.dp)
-                                            .width(singleLineNumColWidth)
+                                            .width(totalLineNumGutterWidth)
                                     )
                                 }
                             }
