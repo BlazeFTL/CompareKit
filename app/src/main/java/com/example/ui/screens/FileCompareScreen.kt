@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.diff.DiffItem
 import com.example.diff.DiffType
+import com.example.diff.SyntaxHighlighter
 import com.example.file.DexCompareOptions
 import com.example.ui.components.DexCompareView
 import com.example.ui.components.DiffSettingsDialog
@@ -185,6 +186,17 @@ fun FileCompareScreen(
 
     // Track active change index
     var currentChangePointer by remember { mutableStateOf(-1) }
+
+    // Prewarm syntax highlighting cache in background off the UI thread
+    LaunchedEffect(effectiveDiffLines, selectedFile) {
+        val path = selectedFile?.relativePath ?: ""
+        if (effectiveDiffLines.isNotEmpty() && path.isNotEmpty()) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                val lines = effectiveDiffLines.map { it.value }
+                SyntaxHighlighter.prewarm(lines, path)
+            }
+        }
+    }
 
     // Reset pointer and auto-scroll to the first diff automatically
     LaunchedEffect(selectedFile, effectiveDiffLines) {
