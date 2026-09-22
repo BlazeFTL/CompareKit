@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -83,6 +84,38 @@ object SplitAligner {
         return result
     }
 }
+
+@Immutable
+data class PreparedSplitCell(
+    val item: DiffItem<String>?,
+    val lineNumText: String,
+    val annotatedText: AnnotatedString,
+    val bgColor: Color,
+    val textStyle: TextStyle
+)
+
+@Immutable
+data class PreparedSplitRow(
+    val rowIndex: Int,
+    val leftIndex: Int,
+    val rightIndex: Int,
+    val leftCell: PreparedSplitCell,
+    val rightCell: PreparedSplitCell,
+    val bannerCount: Int
+)
+
+@Immutable
+data class SplitRowStyles(
+    val monoLineNumStyle: TextStyle,
+    val lineNumColWidth: Dp,
+    val minLineRowHeight: Dp,
+    val verticalLinePadding: Dp,
+    val primaryColor: Color,
+    val lineNumInactiveColor: Color,
+    val showLineNumbers: Boolean,
+    val lineWrap: Boolean,
+    val emptyCellBg: Color
+)
 
 @Composable
 fun SplitDiffView(
@@ -146,144 +179,147 @@ fun SplitDiffView(
     }
     val computedTotalWidthDp = (computedHalfWidthDp * 2).dp
 
+    val effectiveLineHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).sp
+    val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).dp
+    val verticalLinePadding = (fontSizeSp * 0.08f * lineHeightMultiplier).coerceAtLeast(0.5f).dp
+
+    val monoCodeStyle = remember(fontSizeSp, effectiveLineHeight) {
+        TextStyle(
+            fontSize = fontSizeSp.sp,
+            fontFamily = FontFamily.Monospace,
+            lineHeight = effectiveLineHeight,
+            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
+            ),
+            platformStyle = PlatformTextStyle(includeFontPadding = false)
+        )
+    }
+
+    val monoLineNumStyle = remember(effectiveLineNumFontSize, effectiveLineHeight) {
+        TextStyle(
+            fontSize = effectiveLineNumFontSize.sp,
+            fontFamily = FontFamily.Monospace,
+            lineHeight = effectiveLineHeight,
+            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
+            ),
+            platformStyle = PlatformTextStyle(includeFontPadding = false)
+        )
+    }
+
+    val isDarkMode = MaterialTheme.colorScheme.surface.let { (it.red + it.green + it.blue) / 3f < 0.5f }
+
+    val insertBg = remember(isDarkMode) { if (isDarkMode) Color(0xFF132D20) else Color(0xFFE6F4EA) }
+    val insertTextColor = remember(isDarkMode) { if (isDarkMode) Color(0xFF86EFAC) else Color(0xFF0F5132) }
+    val deleteBg = remember(isDarkMode) { if (isDarkMode) Color(0xFF381518) else Color(0xFFFDE8E8) }
+    val deleteTextColor = remember(isDarkMode) { if (isDarkMode) Color(0xFFFCA5A5) else Color(0xFF991B1B) }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val lineNumInactiveColor = Color(0xFF9CA3AF)
+    val emptyCellBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+
+    val rowStyles = remember(
+        monoLineNumStyle, lineNumColWidth, minLineRowHeight, verticalLinePadding,
+        primaryColor, lineNumInactiveColor, showLineNumbers, lineWrap, emptyCellBg
+    ) {
+        SplitRowStyles(
+            monoLineNumStyle = monoLineNumStyle,
+            lineNumColWidth = lineNumColWidth,
+            minLineRowHeight = minLineRowHeight,
+            verticalLinePadding = verticalLinePadding,
+            primaryColor = primaryColor,
+            lineNumInactiveColor = lineNumInactiveColor,
+            showLineNumbers = showLineNumbers,
+            lineWrap = lineWrap,
+            emptyCellBg = emptyCellBg
+        )
+    }
+
+    // Pre-resolve all split rows and cells once
+    val preparedRows = remember(
+        splitRows, filename, searchQuery, isDarkMode, insertBg, insertTextColor,
+        deleteBg, deleteTextColor, onSurfaceColor, monoCodeStyle, lineWrap, fontSizeSp
+    ) {
+        prepareSplitRows(
+            splitRows = splitRows,
+            filename = filename,
+            searchQuery = searchQuery,
+            isDarkMode = isDarkMode,
+            insertBg = insertBg,
+            insertTextColor = insertTextColor,
+            deleteBg = deleteBg,
+            deleteTextColor = deleteTextColor,
+            onSurfaceColor = onSurfaceColor,
+            monoCodeStyle = monoCodeStyle,
+            lineWrap = lineWrap,
+            fontSizeSp = fontSizeSp
+        )
+    }
+
     Box(
         modifier = modifier.fillMaxSize()
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(
-                    end = 30.dp,
-                    bottom = if (!lineWrap && horizontalScrollState.maxValue > 0) 8.dp else 0.dp
-                )
+                .padding(end = 30.dp, bottom = 4.dp)
                 .then(
                     if (!lineWrap) Modifier.horizontalScroll(horizontalScrollState) else Modifier
                 )
         ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .then(
-                        if (!lineWrap) Modifier.width(computedTotalWidthDp) else Modifier.fillMaxWidth()
-                    )
-                    .background(MaterialTheme.colorScheme.surface)
-            ) {
-                itemsIndexed(
-                    items = splitRows,
-                    key = { rowIndex, _ -> rowIndex },
-                    contentType = { rowIndex, row ->
-                        val hasBanner = if (rowIndex == 0) {
-                            val startOrig = row.leftItem?.originalIndex ?: 0
-                            val startRev = row.rightItem?.revisedIndex ?: 0
-                            maxOf(startOrig, startRev) > 0
+            SelectionContainer {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .then(
+                            if (!lineWrap) Modifier.width(computedTotalWidthDp) else Modifier.fillMaxWidth()
+                        )
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    itemsIndexed(
+                        items = preparedRows,
+                        key = { _, row -> row.rowIndex },
+                        contentType = { _, row ->
+                            (row.leftCell.item?.type to row.rightCell.item?.type) to (row.bannerCount > 0)
+                        }
+                    ) { _, row ->
+                        val isLeftActive = row.leftIndex != -1 && row.leftIndex in activeBlockLineRange
+                        val isRightActive = row.rightIndex != -1 && row.rightIndex in activeBlockLineRange
+
+                        if (row.bannerCount > 0) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                DisableSelection {
+                                    CollapsedLinesBanner(
+                                        count = row.bannerCount,
+                                        label = if (row.rowIndex == 0) "at start" else null
+                                    )
+                                }
+                                SplitRowLayout(
+                                    row = row,
+                                    isLeftActive = isLeftActive,
+                                    isRightActive = isRightActive,
+                                    styles = rowStyles
+                                )
+                            }
                         } else {
-                            val prevRow = splitRows[rowIndex - 1]
-                            val origGap = if (row.leftItem?.originalIndex != null && prevRow.leftItem?.originalIndex != null) {
-                                row.leftItem.originalIndex - prevRow.leftItem.originalIndex - 1
-                            } else 0
-                            val revGap = if (row.rightItem?.revisedIndex != null && prevRow.rightItem?.revisedIndex != null) {
-                                row.rightItem.revisedIndex - prevRow.rightItem.revisedIndex - 1
-                            } else 0
-                            maxOf(origGap, revGap) > 0
-                        }
-                        (row.leftItem?.type to row.rightItem?.type) to hasBanner
-                    }
-                ) { rowIndex, row ->
-                    // Visual banner for collapsed lines in between distant changes or at start
-                    val gapCount = if (rowIndex == 0) {
-                        val startOrig = row.leftItem?.originalIndex ?: 0
-                        val startRev = row.rightItem?.revisedIndex ?: 0
-                        maxOf(startOrig, startRev)
-                    } else {
-                        val prevRow = splitRows[rowIndex - 1]
-                        val origGap = if (row.leftItem?.originalIndex != null && prevRow.leftItem?.originalIndex != null) {
-                            row.leftItem.originalIndex - prevRow.leftItem.originalIndex - 1
-                        } else 0
-                        val revGap = if (row.rightItem?.revisedIndex != null && prevRow.rightItem?.revisedIndex != null) {
-                            row.rightItem.revisedIndex - prevRow.rightItem.revisedIndex - 1
-                        } else 0
-                        maxOf(origGap, revGap)
-                    }
-
-                    val isLeftActive = row.leftIndex != -1 && row.leftIndex in activeBlockLineRange
-                    val isRightActive = row.rightIndex != -1 && row.rightIndex in activeBlockLineRange
-
-                    val rowContent = @Composable {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(IntrinsicSize.Min)
-                        ) {
-                            // Left pane: Source File (Deleted/Modified/Equal)
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                            ) {
-                                CellView(
-                                    item = row.leftItem,
-                                    isLeft = true,
-                                    filename = filename,
-                                    searchQuery = searchQuery,
-                                    lineWrap = lineWrap,
-                                    fontSizeSp = fontSizeSp,
-                                    lineHeightMultiplier = lineHeightMultiplier,
-                                    showLineNumbers = showLineNumbers,
-                                    lineNumColWidth = lineNumColWidth,
-                                    isActiveLine = isLeftActive
-                                )
-                            }
-
-                            // Vertical Divider between left and right side
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(1.dp)
-                                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            SplitRowLayout(
+                                row = row,
+                                isLeftActive = isLeftActive,
+                                isRightActive = isRightActive,
+                                styles = rowStyles
                             )
-
-                            // Right pane: Modified File (Inserted/Modified/Equal)
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                            ) {
-                                CellView(
-                                    item = row.rightItem,
-                                    isLeft = false,
-                                    filename = filename,
-                                    searchQuery = searchQuery,
-                                    lineWrap = lineWrap,
-                                    fontSizeSp = fontSizeSp,
-                                    lineHeightMultiplier = lineHeightMultiplier,
-                                    showLineNumbers = showLineNumbers,
-                                    lineNumColWidth = lineNumColWidth,
-                                    isActiveLine = isRightActive
-                                )
-                            }
                         }
                     }
-
-                    if (gapCount > 0) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            DisableSelection {
-                                CollapsedLinesBanner(
-                                    count = gapCount,
-                                    label = if (rowIndex == 0) "at start" else null
-                                )
-                            }
-                            rowContent()
-                        }
-                    } else {
-                        rowContent()
-                    }
-                }
                 }
             }
+        }
 
-        // Bottom horizontal scroll bar indicator
-        if (!lineWrap && horizontalScrollState.maxValue > 0) {
+        // Horizontal bottom scroll indicator
+        if (!lineWrap) {
             HorizontalScrollBar(
                 scrollState = horizontalScrollState,
                 modifier = Modifier
@@ -316,105 +352,269 @@ fun SplitDiffView(
     }
 }
 
-@Composable
-private fun CellView(
-    item: DiffItem<String>?,
-    isLeft: Boolean,
+private fun prepareSplitRows(
+    splitRows: List<SplitLineRow>,
     filename: String,
     searchQuery: String,
+    isDarkMode: Boolean,
+    insertBg: Color,
+    insertTextColor: Color,
+    deleteBg: Color,
+    deleteTextColor: Color,
+    onSurfaceColor: Color,
+    monoCodeStyle: TextStyle,
     lineWrap: Boolean,
-    fontSizeSp: Float,
-    lineHeightMultiplier: Float,
-    showLineNumbers: Boolean,
-    lineNumColWidth: Dp,
-    isActiveLine: Boolean = false
-) {
+    fontSizeSp: Float
+): List<PreparedSplitRow> {
+    val result = ArrayList<PreparedSplitRow>(splitRows.size)
+    val targetExt = SyntaxHighlighter.getTargetExt(filename)
+
+    for (rowIndex in splitRows.indices) {
+        val row = splitRows[rowIndex]
+        val bannerCount = if (rowIndex == 0) {
+            val startOrig = row.leftItem?.originalIndex ?: 0
+            val startRev = row.rightItem?.revisedIndex ?: 0
+            maxOf(startOrig, startRev)
+        } else {
+            val prevRow = splitRows[rowIndex - 1]
+            val origGap = if (row.leftItem?.originalIndex != null && prevRow.leftItem?.originalIndex != null) {
+                row.leftItem.originalIndex - prevRow.leftItem.originalIndex - 1
+            } else 0
+            val revGap = if (row.rightItem?.revisedIndex != null && prevRow.rightItem?.revisedIndex != null) {
+                row.rightItem.revisedIndex - prevRow.rightItem.revisedIndex - 1
+            } else 0
+            maxOf(origGap, revGap)
+        }
+
+        val leftCell = prepareCell(
+            item = row.leftItem,
+            isLeft = true,
+            targetExt = targetExt,
+            searchQuery = searchQuery,
+            isDarkMode = isDarkMode,
+            insertBg = insertBg,
+            insertTextColor = insertTextColor,
+            deleteBg = deleteBg,
+            deleteTextColor = deleteTextColor,
+            onSurfaceColor = onSurfaceColor,
+            monoCodeStyle = monoCodeStyle,
+            lineWrap = lineWrap,
+            fontSizeSp = fontSizeSp
+        )
+
+        val rightCell = prepareCell(
+            item = row.rightItem,
+            isLeft = false,
+            targetExt = targetExt,
+            searchQuery = searchQuery,
+            isDarkMode = isDarkMode,
+            insertBg = insertBg,
+            insertTextColor = insertTextColor,
+            deleteBg = deleteBg,
+            deleteTextColor = deleteTextColor,
+            onSurfaceColor = onSurfaceColor,
+            monoCodeStyle = monoCodeStyle,
+            lineWrap = lineWrap,
+            fontSizeSp = fontSizeSp
+        )
+
+        result.add(
+            PreparedSplitRow(
+                rowIndex = rowIndex,
+                leftIndex = row.leftIndex,
+                rightIndex = row.rightIndex,
+                leftCell = leftCell,
+                rightCell = rightCell,
+                bannerCount = bannerCount
+            )
+        )
+    }
+
+    return result
+}
+
+private fun prepareCell(
+    item: DiffItem<String>?,
+    isLeft: Boolean,
+    targetExt: String?,
+    searchQuery: String,
+    isDarkMode: Boolean,
+    insertBg: Color,
+    insertTextColor: Color,
+    deleteBg: Color,
+    deleteTextColor: Color,
+    onSurfaceColor: Color,
+    monoCodeStyle: TextStyle,
+    lineWrap: Boolean,
+    fontSizeSp: Float
+): PreparedSplitCell {
     if (item == null) {
+        return PreparedSplitCell(
+            item = null,
+            lineNumText = "",
+            annotatedText = AnnotatedString(""),
+            bgColor = Color.Transparent,
+            textStyle = monoCodeStyle
+        )
+    }
+
+    val (bgColor, textColor) = when (item.type) {
+        DiffType.INSERT -> {
+            if (isLeft) Pair(Color.Transparent, onSurfaceColor) else Pair(insertBg, insertTextColor)
+        }
+        DiffType.DELETE -> {
+            if (isLeft) Pair(deleteBg, deleteTextColor) else Pair(Color.Transparent, onSurfaceColor)
+        }
+        DiffType.MODIFIED -> {
+            if (isLeft) Pair(deleteBg, deleteTextColor) else Pair(insertBg, insertTextColor)
+        }
+        DiffType.EQUAL -> Pair(Color.Transparent, onSurfaceColor)
+    }
+
+    val numText = if (isLeft) item.originalIndex?.plus(1)?.toString() ?: "" else item.revisedIndex?.plus(1)?.toString() ?: ""
+
+    val rawText = item.value
+    val baseAnnotatedText = if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
+        buildAnnotatedString {
+            append(rawText)
+            item.subHighlights.forEach { range ->
+                val start = range.start.coerceIn(0, rawText.length)
+                val end = range.end.coerceIn(0, rawText.length)
+                if (start < end) {
+                    addStyle(
+                        style = SpanStyle(
+                            background = if (isLeft) Color(0xFFFFCC80) else Color(0xFF90CAF9),
+                            fontWeight = FontWeight.Bold
+                        ),
+                        start = start,
+                        end = end
+                    )
+                }
+            }
+        }
+    } else {
+        SyntaxHighlighter.highlightWithTargetExt(rawText, targetExt)
+    }
+
+    val annotatedText = if (searchQuery.isNotEmpty() && rawText.contains(searchQuery, ignoreCase = true)) {
+        buildAnnotatedString {
+            append(baseAnnotatedText)
+            var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
+            while (startIndex >= 0 && startIndex < rawText.length) {
+                val endIndex = (startIndex + searchQuery.length).coerceAtMost(rawText.length)
+                addStyle(
+                    style = SpanStyle(
+                        background = Color(0xFFFFEB3B),
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    start = startIndex,
+                    end = endIndex
+                )
+                startIndex = rawText.indexOf(searchQuery, startIndex + 1, ignoreCase = true)
+            }
+        }
+    } else {
+        baseAnnotatedText
+    }
+
+    val leadingSpaceCount = rawText.takeWhile { it == ' ' }.length
+    val indentCharCount = if (leadingSpaceCount > 0) leadingSpaceCount else 4
+    val restLineIndentSp = (fontSizeSp * 0.60f * indentCharCount).sp
+
+    val finalCodeStyle = monoCodeStyle.copy(
+        color = textColor,
+        textIndent = if (lineWrap) TextIndent(firstLine = 0.sp, restLine = restLineIndentSp) else TextIndent.None
+    )
+
+    return PreparedSplitCell(
+        item = item,
+        lineNumText = numText,
+        annotatedText = annotatedText,
+        bgColor = bgColor,
+        textStyle = finalCodeStyle
+    )
+}
+
+@Composable
+private fun SplitRowLayout(
+    row: PreparedSplitRow,
+    isLeftActive: Boolean,
+    isRightActive: Boolean,
+    styles: SplitRowStyles
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Left pane: Source File
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .defaultMinSize(minHeight = styles.minLineRowHeight)
+        ) {
+            SplitCellView(
+                cell = row.leftCell,
+                isActiveLine = isLeftActive,
+                styles = styles
+            )
+        }
+
+        // Vertical Divider between left and right side
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .defaultMinSize(minHeight = styles.minLineRowHeight)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        )
+
+        // Right pane: Modified File
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .defaultMinSize(minHeight = styles.minLineRowHeight)
+        ) {
+            SplitCellView(
+                cell = row.rightCell,
+                isActiveLine = isRightActive,
+                styles = styles
+            )
+        }
+    }
+}
+
+@Composable
+private fun SplitCellView(
+    cell: PreparedSplitCell,
+    isActiveLine: Boolean,
+    styles: SplitRowStyles
+) {
+    if (cell.item == null) {
         // Empty cell for alignment spacing
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = styles.minLineRowHeight)
+                .background(styles.emptyCellBg)
         ) {
             if (isActiveLine) {
                 Box(
                     modifier = Modifier
                         .width(3.dp)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.primary)
+                        .defaultMinSize(minHeight = styles.minLineRowHeight)
+                        .background(styles.primaryColor)
                 )
             }
         }
         return
     }
 
-    val isDarkMode = MaterialTheme.colorScheme.surface.let { (it.red + it.green + it.blue) / 3f < 0.5f }
-
-    val (bgColor, textColor) = when (item.type) {
-        DiffType.INSERT -> {
-            if (isLeft) {
-                Pair(Color.Transparent, MaterialTheme.colorScheme.onSurface)
-            } else {
-                if (isDarkMode) Pair(Color(0xFF132D20), Color(0xFF86EFAC)) else Pair(Color(0xFFE6F4EA), Color(0xFF0F5132))
-            }
-        }
-        DiffType.DELETE -> {
-            if (isLeft) {
-                if (isDarkMode) Pair(Color(0xFF381518), Color(0xFFFCA5A5)) else Pair(Color(0xFFFDE8E8), Color(0xFF991B1B))
-            } else {
-                Pair(Color.Transparent, MaterialTheme.colorScheme.onSurface)
-            }
-        }
-        DiffType.MODIFIED -> {
-            if (isLeft) {
-                if (isDarkMode) Pair(Color(0xFF381518), Color(0xFFFCA5A5)) else Pair(Color(0xFFFDE8E8), Color(0xFF991B1B))
-            } else {
-                if (isDarkMode) Pair(Color(0xFF132D20), Color(0xFF86EFAC)) else Pair(Color(0xFFE6F4EA), Color(0xFF0F5132))
-            }
-        }
-        DiffType.EQUAL -> Pair(Color.Transparent, MaterialTheme.colorScheme.onSurface)
-    }
-
-    val numText = if (isLeft) item.originalIndex?.plus(1)?.toString() ?: "" else item.revisedIndex?.plus(1)?.toString() ?: ""
-
-    val effectiveLineNumFontSize = (fontSizeSp * 0.85f).coerceAtLeast(3.5f)
-
-    val effectiveLineHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).sp
-    val minLineRowHeight = (fontSizeSp * lineHeightMultiplier * 1.25f).dp
-    val verticalLinePadding = (fontSizeSp * 0.08f * lineHeightMultiplier).coerceAtLeast(0.5f).dp
-
-    val monoCodeStyle = remember(fontSizeSp, effectiveLineHeight) {
-        TextStyle(
-            fontSize = fontSizeSp.sp,
-            fontFamily = FontFamily.Monospace,
-            lineHeight = effectiveLineHeight,
-            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
-                alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-                trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
-            ),
-            platformStyle = PlatformTextStyle(includeFontPadding = false)
-        )
-    }
-
-    val monoLineNumStyle = remember(effectiveLineNumFontSize, effectiveLineHeight) {
-        TextStyle(
-            fontSize = effectiveLineNumFontSize.sp,
-            fontFamily = FontFamily.Monospace,
-            lineHeight = effectiveLineHeight,
-            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
-                alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-                trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
-            ),
-            platformStyle = PlatformTextStyle(includeFontPadding = false)
-        )
-    }
-
     Row(
         modifier = Modifier
-            .fillMaxSize()
-            .background(bgColor)
-            .defaultMinSize(minHeight = minLineRowHeight)
-            .padding(vertical = verticalLinePadding),
+            .fillMaxWidth()
+            .background(cell.bgColor)
+            .defaultMinSize(minHeight = styles.minLineRowHeight)
+            .padding(vertical = styles.verticalLinePadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         DisableSelection {
@@ -422,22 +622,22 @@ private fun CellView(
             Box(
                 modifier = Modifier
                     .width(3.dp)
-                    .height(minLineRowHeight)
-                    .background(if (isActiveLine) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    .height(styles.minLineRowHeight)
+                    .background(if (isActiveLine) styles.primaryColor else Color.Transparent)
             )
 
-            if (showLineNumbers) {
+            if (styles.showLineNumbers) {
                 Box(
                     modifier = Modifier
-                        .width(lineNumColWidth)
+                        .width(styles.lineNumColWidth)
                         .padding(end = 4.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
                     Text(
-                        text = numText,
-                        color = if (isActiveLine) MaterialTheme.colorScheme.primary else Color(0xFF9CA3AF),
+                        text = cell.lineNumText,
+                        color = if (isActiveLine) styles.primaryColor else styles.lineNumInactiveColor,
                         fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal,
-                        style = monoLineNumStyle,
+                        style = styles.monoLineNumStyle,
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Clip,
@@ -447,86 +647,16 @@ private fun CellView(
             }
         }
 
-        // Line Content
-        val rawText = item.value
-        val baseAnnotatedText = remember(rawText, filename, item.type, item.subHighlights) {
-            if (item.type == DiffType.MODIFIED && item.subHighlights != null) {
-                buildAnnotatedString {
-                    append(rawText)
-                    item.subHighlights.forEach { range ->
-                        val start = range.start.coerceIn(0, rawText.length)
-                        val end = range.end.coerceIn(0, rawText.length)
-                        if (start < end) {
-                            addStyle(
-                                style = SpanStyle(
-                                    background = if (isLeft) {
-                                        Color(0xFFFFCC80)
-                                    } else {
-                                        Color(0xFF90CAF9)
-                                    },
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                start = start,
-                                end = end
-                            )
-                        }
-                    }
-                }
-            } else {
-                SyntaxHighlighter.highlight(rawText, filename)
-            }
-        }
-
-        val annotatedText = remember(baseAnnotatedText, searchQuery, rawText) {
-            if (searchQuery.isNotEmpty()) {
-                buildAnnotatedString {
-                    append(baseAnnotatedText)
-                    var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
-                    while (startIndex >= 0 && startIndex < rawText.length) {
-                        val endIndex = (startIndex + searchQuery.length).coerceAtMost(rawText.length)
-                        addStyle(
-                            style = SpanStyle(
-                                background = Color(0xFFFFEB3B),
-                                color = Color.Black,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            start = startIndex,
-                            end = endIndex
-                        )
-                        startIndex = rawText.indexOf(searchQuery, startIndex + 1, ignoreCase = true)
-                    }
-                }
-            } else {
-                baseAnnotatedText
-            }
-        }
-
-        // Hanging indentation for wrapped code
-        val leadingSpaceCount = remember(rawText) { rawText.takeWhile { it == ' ' }.length }
-        val indentCharCount = if (leadingSpaceCount > 0) leadingSpaceCount else 4
-        val restLineIndentSp = (fontSizeSp * 0.60f * indentCharCount).sp
-
-        val finalCodeStyle = if (item.type == DiffType.INSERT || item.type == DiffType.DELETE || item.type == DiffType.MODIFIED) {
-            monoCodeStyle.copy(
-                color = textColor,
-                textIndent = if (lineWrap) TextIndent(firstLine = 0.sp, restLine = restLineIndentSp) else TextIndent.None
-            )
-        } else {
-            monoCodeStyle.copy(
-                color = MaterialTheme.colorScheme.onSurface,
-                textIndent = if (lineWrap) TextIndent(firstLine = 0.sp, restLine = restLineIndentSp) else TextIndent.None
-            )
-        }
-
+        // Line Content (fully selectable for copying)
         Box(
             modifier = Modifier
                 .weight(1f)
                 .padding(start = 2.dp, end = 6.dp)
         ) {
             Text(
-                text = annotatedText,
-                style = finalCodeStyle,
-                softWrap = lineWrap
+                text = cell.annotatedText,
+                style = cell.textStyle,
+                softWrap = styles.lineWrap
             )
         }
     }

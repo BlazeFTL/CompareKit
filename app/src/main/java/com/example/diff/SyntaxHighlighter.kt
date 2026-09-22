@@ -40,13 +40,46 @@ object SyntaxHighlighter {
     private val SMALI_COMMENT_REGEX = "#.*".toRegex()
     private val SMALI_NUMBER_REGEX = "-?0x[0-9a-fA-F]+L?|-?\\d+L?".toRegex()
 
+    fun getTargetExt(filename: String, sampleLines: List<String> = emptyList()): String? {
+        val ext = filename.lowercase().substringAfterLast('.', "")
+        if (ext in setOf("json", "xml", "html", "htm", "js", "ts", "kt", "java", "css", "smali", "dex")) {
+            return ext
+        }
+        if (filename.equals("smali", ignoreCase = true) || ext == "smali" || ext == "dex") {
+            return "smali"
+        }
+        if (sampleLines.isNotEmpty() && sampleLines.take(30).any { 
+            it.startsWith(".class") || it.startsWith(".method") || it.contains("invoke-") || it.startsWith("#") 
+        }) {
+            return "smali"
+        }
+        return null
+    }
+
+    fun highlightWithTargetExt(text: String, targetExt: String?): AnnotatedString {
+        if (text.isEmpty()) return AnnotatedString("")
+        if (targetExt == null) return AnnotatedString(text)
+
+        val cacheKey = "$targetExt:$text"
+        val cached = cache.get(cacheKey)
+        if (cached != null) {
+            return cached
+        }
+
+        val result = when (targetExt) {
+            "json" -> highlightJson(text)
+            "xml", "html", "htm" -> highlightXmlHtml(text)
+            "smali", "dex" -> highlightSmali(text)
+            "js", "ts", "kt", "java", "css" -> highlightCode(text)
+            else -> AnnotatedString(text)
+        }
+        cache.put(cacheKey, result)
+        return result
+    }
+
     fun prewarm(lines: List<String>, filename: String) {
         if (lines.isEmpty()) return
-        val ext = filename.lowercase().substringAfterLast('.', "")
-        val isKnownExt = ext in setOf("json", "xml", "html", "htm", "js", "ts", "kt", "java", "css", "smali", "dex")
-        val forceSmali = filename.equals("smali", ignoreCase = true) || (!isKnownExt && lines.any { it.startsWith(".class") || it.startsWith(".method") || it.contains("invoke-") })
-        val targetExt = if (forceSmali) "smali" else if (isKnownExt) ext else null
-        if (targetExt == null) return
+        val targetExt = getTargetExt(filename, lines) ?: return
 
         val limit = minOf(lines.size, 8000)
         for (i in 0 until limit) {
@@ -79,25 +112,7 @@ object SyntaxHighlighter {
         )
 
         val targetExt = if (isSmaliFile) "smali" else if (isKnownExt) ext else if (looksLikeSmali) "smali" else null
-        if (targetExt == null) {
-            return AnnotatedString(text)
-        }
-
-        val cacheKey = "$targetExt:$text"
-        val cached = cache.get(cacheKey)
-        if (cached != null) {
-            return cached
-        }
-
-        val result = when (targetExt) {
-            "json" -> highlightJson(text)
-            "xml", "html", "htm" -> highlightXmlHtml(text)
-            "smali", "dex" -> highlightSmali(text)
-            "js", "ts", "kt", "java", "css" -> highlightCode(text)
-            else -> AnnotatedString(text)
-        }
-        cache.put(cacheKey, result)
-        return result
+        return highlightWithTargetExt(text, targetExt)
     }
 
     private fun highlightSmali(text: String): AnnotatedString {
