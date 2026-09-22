@@ -59,6 +59,8 @@ object SyntaxHighlighter {
     fun highlightWithTargetExt(text: String, targetExt: String?): AnnotatedString {
         if (text.isEmpty()) return AnnotatedString("")
         if (targetExt == null) return AnnotatedString(text)
+        if (text.length > 1000) return AnnotatedString(text)
+        if (!text.any { it.isLetter() }) return AnnotatedString(text)
 
         val cacheKey = "$targetExt:$text"
         val cached = cache.get(cacheKey)

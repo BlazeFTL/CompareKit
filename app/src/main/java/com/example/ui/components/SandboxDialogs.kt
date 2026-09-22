@@ -158,16 +158,18 @@ fun EditFileDialog(
 fun DiffSettingsDialog(
     options: DiffOptions,
     beautifierEnabled: Boolean,
+    syntaxHighlightingEnabled: Boolean = true,
     lineHeightMultiplier: Float = 1.30f,
     isDecompiledApk: Boolean = false,
     dexOptions: DexCompareOptions = DexCompareOptions(),
     onDismiss: () -> Unit,
-    onSave: (options: DiffOptions, beautifierEnabled: Boolean, dexOptions: DexCompareOptions, lineHeightMultiplier: Float) -> Unit
+    onSave: (options: DiffOptions, beautifierEnabled: Boolean, dexOptions: DexCompareOptions, lineHeightMultiplier: Float, syntaxHighlighting: Boolean) -> Unit
 ) {
     var ignoreWhitespace by remember { mutableStateOf(options.ignoreWhitespace) }
     var ignoreEmptyLines by remember { mutableStateOf(options.ignoreEmptyLines) }
     var matchCase by remember { mutableStateOf(options.matchCase) }
     var beautifier by remember { mutableStateOf(beautifierEnabled) }
+    var syntaxHighlighting by remember { mutableStateOf(syntaxHighlightingEnabled) }
     var currentLineHeight by remember { mutableStateOf(lineHeightMultiplier) }
     var ignoreDebugInfo by remember { mutableStateOf(dexOptions.ignoreDebugInfo) }
     var ignoreCompilationOptimizations by remember { mutableStateOf(dexOptions.ignoreCompilationOptimizations) }
@@ -331,6 +333,13 @@ fun DiffSettingsDialog(
                         subtitle = "Format minified JSON, XML & HTML before diffing",
                         checked = beautifier,
                         onCheckedChange = { beautifier = it }
+                    )
+
+                    SettingsSwitchRow(
+                        title = "Syntax Highlighting",
+                        subtitle = "Colorize code, keywords & symbols (toggle off for maximum performance)",
+                        checked = syntaxHighlighting,
+                        onCheckedChange = { syntaxHighlighting = it }
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -621,7 +630,8 @@ fun DiffSettingsDialog(
                                         ignoreRegisterCount = ignoreRegisterCount,
                                         ignoreFieldInitialValues = ignoreFieldInitialValues
                                     ),
-                                    currentLineHeight
+                                    currentLineHeight,
+                                    syntaxHighlighting
                                 )
                             },
                             modifier = Modifier

@@ -106,6 +106,9 @@ class CompareViewModel : ViewModel() {
     private val _lineWrapEnabled = MutableStateFlow(true)
     val lineWrapEnabled: StateFlow<Boolean> = _lineWrapEnabled.asStateFlow()
 
+    private val _syntaxHighlightingEnabled = MutableStateFlow(true)
+    val syntaxHighlightingEnabled: StateFlow<Boolean> = _syntaxHighlightingEnabled.asStateFlow()
+
     private val _lineHeightMultiplier = MutableStateFlow(1.30f)
     val lineHeightMultiplier: StateFlow<Float> = _lineHeightMultiplier.asStateFlow()
 
@@ -1387,6 +1390,11 @@ class CompareViewModel : ViewModel() {
         _lineWrapEnabled.value = enabled
     }
 
+    fun setSyntaxHighlightingEnabled(enabled: Boolean) {
+        _syntaxHighlightingEnabled.value = enabled
+        sharedPrefs?.edit()?.putBoolean("syntax_highlighting", enabled)?.apply()
+    }
+
     fun setLineHeightMultiplier(multiplier: Float) {
         val clamped = (kotlin.math.round(multiplier * 20f) / 20f).coerceIn(0.50f, 2.50f)
         _lineHeightMultiplier.value = clamped
@@ -1402,6 +1410,7 @@ class CompareViewModel : ViewModel() {
             _appTheme.value = AppTheme.FOREST
         }
         _lineHeightMultiplier.value = sharedPrefs?.getFloat("line_height_multiplier", 1.30f) ?: 1.30f
+        _syntaxHighlightingEnabled.value = sharedPrefs?.getBoolean("syntax_highlighting", true) ?: true
 
         val ignoreDebugInfo = sharedPrefs?.getBoolean("dex_ignore_debug_info", true) ?: true
         val ignoreCompilationOptimizations = sharedPrefs?.getBoolean("dex_ignore_compilation_opt", true) ?: true

@@ -67,6 +67,7 @@ fun FileCompareScreen(
 
     val showLineNumbers by viewModel.showLineNumbers.collectAsState()
     val lineWrapEnabled by viewModel.lineWrapEnabled.collectAsState()
+    val syntaxHighlightingEnabled by viewModel.syntaxHighlightingEnabled.collectAsState()
     val lineHeightMultiplier by viewModel.lineHeightMultiplier.collectAsState()
 
     val listState = rememberLazyListState()
@@ -187,10 +188,10 @@ fun FileCompareScreen(
     // Track active change index
     var currentChangePointer by remember { mutableStateOf(-1) }
 
-    // Prewarm syntax highlighting cache in background off the UI thread
-    LaunchedEffect(effectiveDiffLines, selectedFile) {
+    // Prewarm syntax highlighting cache in background off the UI thread (only if enabled)
+    LaunchedEffect(effectiveDiffLines, selectedFile, syntaxHighlightingEnabled) {
         val path = selectedFile?.relativePath ?: ""
-        if (effectiveDiffLines.isNotEmpty() && path.isNotEmpty()) {
+        if (syntaxHighlightingEnabled && effectiveDiffLines.isNotEmpty() && path.isNotEmpty()) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                 val lines = effectiveDiffLines.map { it.value }
                 SyntaxHighlighter.prewarm(lines, path)
@@ -489,6 +490,42 @@ fun FileCompareScreen(
                                         },
                                         onClick = {
                                             viewModel.setShowLineNumbers(!showLineNumbers)
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Syntax Highlighting",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                                Switch(
+                                                    checked = syntaxHighlightingEnabled,
+                                                    onCheckedChange = { viewModel.setSyntaxHighlightingEnabled(it) },
+                                                    modifier = Modifier.height(24.dp),
+                                                    colors = SwitchDefaults.colors(
+                                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                                        checkedTrackColor = MaterialTheme.colorScheme.primary
+                                                    )
+                                                )
+                                            }
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Code,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        },
+                                        onClick = {
+                                            viewModel.setSyntaxHighlightingEnabled(!syntaxHighlightingEnabled)
                                         }
                                     )
 
@@ -1208,6 +1245,7 @@ fun FileCompareScreen(
                             fontSizeSp = fontSize,
                             lineHeightMultiplier = lineHeightMultiplier,
                             showLineNumbers = showLineNumbers,
+                            syntaxHighlightingEnabled = syntaxHighlightingEnabled,
                             activeChangePointer = currentChangePointer,
                             changeBlocks = changeBlocks,
                             modifier = Modifier.fillMaxSize()
@@ -1222,6 +1260,7 @@ fun FileCompareScreen(
                             fontSizeSp = fontSize,
                             lineHeightMultiplier = lineHeightMultiplier,
                             showLineNumbers = showLineNumbers,
+                            syntaxHighlightingEnabled = syntaxHighlightingEnabled,
                             activeChangePointer = currentChangePointer,
                             changeBlocks = changeBlocks,
                             modifier = Modifier.fillMaxSize()
@@ -1417,16 +1456,20 @@ fun FileCompareScreen(
         DiffSettingsDialog(
             options = diffOptions,
             beautifierEnabled = beautifierEnabled,
+            syntaxHighlightingEnabled = syntaxHighlightingEnabled,
             lineHeightMultiplier = lineHeightMultiplier,
             isDecompiledApk = viewModel.isDecompiledApkComparison(),
             dexOptions = dexCompareOptions,
             onDismiss = { showSettingsDialog = false },
-            onSave = { opts, pretty, dexOpts, heightMultiplier ->
+            onSave = { opts, pretty, dexOpts, heightMultiplier, syntaxHighlighting ->
                 if (diffOptions != opts) {
                     viewModel.updateDiffOptions(opts)
                 }
                 if (beautifierEnabled != pretty) {
                     viewModel.setBeautifierEnabled(pretty)
+                }
+                if (syntaxHighlightingEnabled != syntaxHighlighting) {
+                    viewModel.setSyntaxHighlightingEnabled(syntaxHighlighting)
                 }
                 if (dexCompareOptions != dexOpts) {
                     viewModel.updateDexCompareOptions(dexOpts)

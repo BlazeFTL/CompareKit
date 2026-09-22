@@ -99,6 +99,7 @@ fun CompareListScreen(
     val statusFilter by viewModel.statusFilter.collectAsState()
     val diffOptions by viewModel.diffOptions.collectAsState()
     val beautifierEnabled by viewModel.beautifierEnabled.collectAsState()
+    val syntaxHighlightingEnabled by viewModel.syntaxHighlightingEnabled.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
     val dexCompareOptions by viewModel.dexCompareOptions.collectAsState()
@@ -1910,16 +1911,20 @@ fun CompareListScreen(
         DiffSettingsDialog(
             options = diffOptions,
             beautifierEnabled = beautifierEnabled,
+            syntaxHighlightingEnabled = syntaxHighlightingEnabled,
             lineHeightMultiplier = lineHeightMultiplier,
             isDecompiledApk = viewModel.isDecompiledApkComparison(),
             dexOptions = dexCompareOptions,
             onDismiss = { showSettingsDialog = false },
-            onSave = { opts, pretty, dexOpts, heightMultiplier ->
+            onSave = { opts, pretty, dexOpts, heightMultiplier, syntaxHighlighting ->
                 if (diffOptions != opts) {
                     viewModel.updateDiffOptions(opts)
                 }
                 if (beautifierEnabled != pretty) {
                     viewModel.setBeautifierEnabled(pretty)
+                }
+                if (syntaxHighlightingEnabled != syntaxHighlighting) {
+                    viewModel.setSyntaxHighlightingEnabled(syntaxHighlighting)
                 }
                 if (dexCompareOptions != dexOpts) {
                     viewModel.updateDexCompareOptions(dexOpts)

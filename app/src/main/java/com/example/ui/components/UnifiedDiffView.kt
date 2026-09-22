@@ -1,9 +1,15 @@
 package com.example.ui.components
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,8 +17,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.DisableSelection
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material3.Icon
@@ -29,6 +33,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
@@ -36,25 +41,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextIndent
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.diff.DiffItem
 import com.example.diff.DiffType
 import com.example.diff.SyntaxHighlighter
-
-@Immutable
-data class PreparedDiffLine(
-    val index: Int,
-    val type: DiffType,
-    val lineNumText: String,
-    val prefix: String,
-    val annotatedText: AnnotatedString,
-    val bannerCount: Int,
-    val isOriginalSide: Boolean
-)
 
 @Immutable
 data class DiffRowStyles(
@@ -78,8 +69,10 @@ data class DiffRowStyles(
     val isDualLineNumbers: Boolean,
     val hasRevised: Boolean,
     val filename: String,
+    val targetExt: String?,
     val searchQuery: String,
-    val lineWrap: Boolean
+    val lineWrap: Boolean,
+    val syntaxHighlightingEnabled: Boolean
 )
 
 private data class DiffStats(
@@ -101,6 +94,7 @@ fun UnifiedDiffView(
     lineHeightMultiplier: Float = 1.15f,
     modifier: Modifier = Modifier,
     showLineNumbers: Boolean = true,
+    syntaxHighlightingEnabled: Boolean = true,
     activeChangePointer: Int = -1,
     changeBlocks: List<Int> = emptyList()
 ) {
@@ -140,12 +134,12 @@ fun UnifiedDiffView(
             val len = item.value.length
             if (len > maxLen) maxLen = len
         }
-        val maxTotalLine = maxLineNum + 1
-        val digits = maxTotalLine.toString().length.coerceAtLeast(2)
+        val isDual = hasOrig && hasRev
+        val digits = maxOf(3, (maxLineNum + 1).toString().length)
         DiffStats(
             hasOriginal = hasOrig,
             hasRevised = hasRev,
-            isDualLineNumbers = hasOrig && hasRev,
+            isDualLineNumbers = isDual,
             digitCount = digits,
             maxLineLength = maxLen
         )
@@ -225,13 +219,15 @@ fun UnifiedDiffView(
     val prefixBoldStyle = remember(monoCodeStyle) { monoCodeStyle.copy(fontWeight = FontWeight.Bold) }
     val prefixWidth = remember(fontSizeSp) { (fontSizeSp * 0.85f).coerceIn(8f, 18f).dp }
 
+    val targetExt = remember(filename) { SyntaxHighlighter.getTargetExt(filename) }
+
     val rowStyles = remember(
         insertBg, insertPrefixColor, insertCodeStyle,
         deleteBg, deletePrefixColor, deleteCodeStyle,
         normalCodeStyle, prefixBoldStyle, primaryColor, lineNumInactiveColor,
         monoLineNumStyle, totalLineNumGutterWidth, prefixWidth, minLineRowHeight,
         verticalLinePadding, stats.digitCount, showLineNumbers, stats.isDualLineNumbers,
-        stats.hasRevised, filename, searchQuery, lineWrap
+        stats.hasRevised, filename, targetExt, searchQuery, lineWrap, syntaxHighlightingEnabled
     ) {
         DiffRowStyles(
             insertBg = insertBg,
@@ -254,8 +250,10 @@ fun UnifiedDiffView(
             isDualLineNumbers = stats.isDualLineNumbers,
             hasRevised = stats.hasRevised,
             filename = filename,
+            targetExt = targetExt,
             searchQuery = searchQuery,
-            lineWrap = lineWrap
+            lineWrap = lineWrap,
+            syntaxHighlightingEnabled = syntaxHighlightingEnabled
         )
     }
 
@@ -270,7 +268,7 @@ fun UnifiedDiffView(
         }
     }
 
-    // Precompute collapsed banner counts once for all lines
+    // Precompute collapsed banner counts once for all lines (O(N) single pass of primitive ints)
     val bannerCounts = remember(diffLines) {
         if (diffLines.isEmpty()) return@remember IntArray(0)
         val counts = IntArray(diffLines.size)
@@ -291,23 +289,6 @@ fun UnifiedDiffView(
         counts
     }
 
-    // Pre-resolve all diff lines (syntax highlighting, line numbers, prefixes, subHighlights)
-    // to ensure scrolling does ZERO computation or string allocation
-    val preparedLines = remember(
-        diffLines, filename, stats.isDualLineNumbers, stats.digitCount, showLineNumbers, stats.hasRevised, searchQuery, bannerCounts
-    ) {
-        prepareDiffLines(
-            diffLines = diffLines,
-            filename = filename,
-            isDualLineNumbers = stats.isDualLineNumbers,
-            digitCount = stats.digitCount,
-            showLineNumbers = showLineNumbers,
-            hasRevised = stats.hasRevised,
-            searchQuery = searchQuery,
-            bannerCounts = bannerCounts
-        )
-    }
-
     Box(
         modifier = modifier.fillMaxSize()
     ) {
@@ -319,44 +300,43 @@ fun UnifiedDiffView(
                     if (!lineWrap) Modifier.horizontalScroll(horizontalScrollState) else Modifier
                 )
         ) {
-            SelectionContainer {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .then(
-                            if (!lineWrap) Modifier.width(computedWidthDp) else Modifier.fillMaxWidth()
-                        )
-                        .background(MaterialTheme.colorScheme.surface)
-                ) {
-                    itemsIndexed(
-                        items = preparedLines,
-                        key = { index, _ -> index },
-                        contentType = { _, line -> line.type to (line.bannerCount > 0) }
-                    ) { index, line ->
-                        val isActiveLine = index in activeRange
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .then(
+                        if (!lineWrap) Modifier.width(computedWidthDp) else Modifier.fillMaxWidth()
+                    )
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
+                itemsIndexed(
+                    items = diffLines,
+                    key = { index, _ -> index },
+                    contentType = { _, item -> item.type }
+                ) { index, item ->
+                    val isActiveLine = index in activeRange
+                    val bannerCount = if (index < bannerCounts.size) bannerCounts[index] else 0
 
-                        if (line.bannerCount > 0) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                DisableSelection {
-                                    CollapsedLinesBanner(
-                                        count = line.bannerCount,
-                                        label = if (index == 0) "at start" else null
-                                    )
-                                }
-                                UnifiedDiffRow(
-                                    line = line,
-                                    isActiveLine = isActiveLine,
-                                    styles = rowStyles
-                                )
-                            }
-                        } else {
+                    if (bannerCount > 0) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            CollapsedLinesBanner(
+                                count = bannerCount,
+                                label = if (index == 0) "at start" else null
+                            )
                             UnifiedDiffRow(
-                                line = line,
+                                item = item,
+                                index = index,
                                 isActiveLine = isActiveLine,
                                 styles = rowStyles
                             )
                         }
+                    } else {
+                        UnifiedDiffRow(
+                            item = item,
+                            index = index,
+                            isActiveLine = isActiveLine,
+                            styles = rowStyles
+                        )
                     }
                 }
             }
@@ -386,107 +366,6 @@ fun UnifiedDiffView(
             colorSelector = minimapColorSelector
         )
     }
-}
-
-private fun prepareDiffLines(
-    diffLines: List<DiffItem<String>>,
-    filename: String,
-    isDualLineNumbers: Boolean,
-    digitCount: Int,
-    showLineNumbers: Boolean,
-    hasRevised: Boolean,
-    searchQuery: String,
-    bannerCounts: IntArray
-): List<PreparedDiffLine> {
-    val result = ArrayList<PreparedDiffLine>(diffLines.size)
-    val hasSearch = searchQuery.isNotEmpty()
-    val targetExt = SyntaxHighlighter.getTargetExt(filename)
-
-    for (index in diffLines.indices) {
-        val item = diffLines[index]
-        val rawText = item.value
-        val itemType = item.type
-        val isOrig = item.originalIndex != null
-
-        // Line number gutter text
-        val lineNumText = if (showLineNumbers) {
-            if (isDualLineNumbers) {
-                val o = (item.originalIndex?.plus(1)?.toString() ?: "").padStart(digitCount)
-                val r = (item.revisedIndex?.plus(1)?.toString() ?: "").padStart(digitCount)
-                "$o $r"
-            } else {
-                (if (hasRevised) item.revisedIndex?.plus(1) else item.originalIndex?.plus(1))
-                    ?.toString()?.padStart(digitCount) ?: ""
-            }
-        } else ""
-
-        // Prefix
-        val prefix = when (itemType) {
-            DiffType.INSERT -> "+"
-            DiffType.DELETE -> "-"
-            DiffType.MODIFIED -> if (isOrig) "-" else "+"
-            DiffType.EQUAL -> " "
-        }
-
-        // Highlighted text
-        val baseAnnotated = if (itemType == DiffType.MODIFIED && item.subHighlights != null) {
-            buildAnnotatedString {
-                append(rawText)
-                item.subHighlights.forEach { range ->
-                    val start = range.start.coerceIn(0, rawText.length)
-                    val end = range.end.coerceIn(0, rawText.length)
-                    if (start < end) {
-                        addStyle(
-                            style = SpanStyle(
-                                background = if (isOrig) Color(0xFFFFCC80) else Color(0xFF90CAF9),
-                                fontWeight = FontWeight.Bold
-                            ),
-                            start = start,
-                            end = end
-                        )
-                    }
-                }
-            }
-        } else {
-            SyntaxHighlighter.highlightWithTargetExt(rawText, targetExt)
-        }
-
-        val finalAnnotated = if (hasSearch && rawText.contains(searchQuery, ignoreCase = true)) {
-            buildAnnotatedString {
-                append(baseAnnotated)
-                var startIndex = rawText.indexOf(searchQuery, ignoreCase = true)
-                while (startIndex >= 0 && startIndex < rawText.length) {
-                    val endIndex = (startIndex + searchQuery.length).coerceAtMost(rawText.length)
-                    addStyle(
-                        style = SpanStyle(
-                            background = Color(0xFFFFEB3B),
-                            color = Color.Black,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        start = startIndex,
-                        end = endIndex
-                    )
-                    startIndex = rawText.indexOf(searchQuery, startIndex + 1, ignoreCase = true)
-                }
-            }
-        } else {
-            baseAnnotated
-        }
-
-        result.add(
-            PreparedDiffLine(
-                index = index,
-                type = itemType,
-                lineNumText = lineNumText,
-                prefix = prefix,
-                annotatedText = finalAnnotated,
-                bannerCount = if (index < bannerCounts.size) bannerCounts[index] else 0,
-                isOriginalSide = isOrig
-            )
-        )
-    }
-
-    return result
 }
 
 @Composable
@@ -526,24 +405,93 @@ fun HorizontalScrollBar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun UnifiedDiffRow(
-    line: PreparedDiffLine,
+    item: DiffItem<String>,
+    index: Int,
     isActiveLine: Boolean,
     styles: DiffRowStyles
 ) {
-    val itemType = line.type
+    val context = LocalContext.current
+    val itemType = item.type
+    val isOrig = item.originalIndex != null
+
     val (bgColor, prefixColor, textStyle) = when (itemType) {
         DiffType.INSERT -> Triple(styles.insertBg, styles.insertPrefixColor, styles.insertCodeStyle)
         DiffType.DELETE -> Triple(styles.deleteBg, styles.deletePrefixColor, styles.deleteCodeStyle)
         DiffType.MODIFIED -> {
-            if (line.isOriginalSide) {
+            if (isOrig) {
                 Triple(styles.deleteBg, styles.deletePrefixColor, styles.deleteCodeStyle)
             } else {
                 Triple(styles.insertBg, styles.insertPrefixColor, styles.insertCodeStyle)
             }
         }
         DiffType.EQUAL -> Triple(Color.Transparent, styles.lineNumInactiveColor, styles.normalCodeStyle)
+    }
+
+    val prefix = when (itemType) {
+        DiffType.INSERT -> "+"
+        DiffType.DELETE -> "-"
+        DiffType.MODIFIED -> if (isOrig) "-" else "+"
+        DiffType.EQUAL -> " "
+    }
+
+    val rawText = item.value
+
+    // Format line numbers only if enabled
+    val lineNumText = if (styles.showLineNumbers) {
+        if (styles.isDualLineNumbers) {
+            val o = (item.originalIndex?.plus(1)?.toString() ?: "").padStart(styles.digitCount)
+            val r = (item.revisedIndex?.plus(1)?.toString() ?: "").padStart(styles.digitCount)
+            "$o $r"
+        } else {
+            (if (styles.hasRevised) item.revisedIndex?.plus(1) else item.originalIndex?.plus(1))
+                ?.toString()?.padStart(styles.digitCount) ?: ""
+        }
+    } else ""
+
+    // Format highlighted content on-demand for visible items only
+    val annotatedText = remember(
+        rawText, itemType, item.subHighlights, styles.syntaxHighlightingEnabled, styles.targetExt, styles.searchQuery
+    ) {
+        if (!styles.syntaxHighlightingEnabled) {
+            // Maximum speed: zero regex highlighting
+            if (styles.searchQuery.isNotEmpty() && rawText.contains(styles.searchQuery, ignoreCase = true)) {
+                highlightSearchInString(rawText, styles.searchQuery)
+            } else {
+                AnnotatedString(rawText)
+            }
+        } else {
+            // Syntax highlighted with subHighlights
+            val base = if (itemType == DiffType.MODIFIED && item.subHighlights != null) {
+                buildAnnotatedString {
+                    append(rawText)
+                    item.subHighlights.forEach { range ->
+                        val start = range.start.coerceIn(0, rawText.length)
+                        val end = range.end.coerceIn(0, rawText.length)
+                        if (start < end) {
+                            addStyle(
+                                style = SpanStyle(
+                                    background = if (isOrig) Color(0xFFFFCC80) else Color(0xFF90CAF9),
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                start = start,
+                                end = end
+                            )
+                        }
+                    }
+                }
+            } else {
+                SyntaxHighlighter.highlightWithTargetExt(rawText, styles.targetExt)
+            }
+
+            if (styles.searchQuery.isNotEmpty() && rawText.contains(styles.searchQuery, ignoreCase = true)) {
+                highlightSearchInAnnotated(base, rawText, styles.searchQuery)
+            } else {
+                base
+            }
+        }
     }
 
     Row(
@@ -559,57 +507,114 @@ private fun UnifiedDiffRow(
                     )
                 }
                 .defaultMinSize(minHeight = styles.minLineRowHeight)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = {
+                        copyToClipboard(context, rawText)
+                    }
+                )
                 .padding(vertical = styles.verticalLinePadding)
         } else {
             Modifier
                 .fillMaxWidth()
                 .background(bgColor)
                 .defaultMinSize(minHeight = styles.minLineRowHeight)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = {
+                        copyToClipboard(context, rawText)
+                    }
+                )
                 .padding(vertical = styles.verticalLinePadding)
         },
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Gutter line numbers (excluded from text selection)
+        // Gutter line numbers
         if (styles.showLineNumbers) {
             val numColor = if (isActiveLine) styles.primaryColor else styles.lineNumInactiveColor
             val numWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal
 
-            DisableSelection {
-                Text(
-                    text = line.lineNumText,
-                    color = numColor,
-                    fontWeight = numWeight,
-                    style = styles.monoLineNumStyle,
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier
-                        .padding(start = 4.dp, end = 4.dp)
-                        .width(styles.totalLineNumGutterWidth)
-                )
-            }
-        }
-
-        // Prefix indicator (+, -, or space, excluded from text selection)
-        DisableSelection {
             Text(
-                text = line.prefix,
-                color = prefixColor,
-                style = styles.prefixBoldStyle,
+                text = lineNumText,
+                color = numColor,
+                fontWeight = numWeight,
+                style = styles.monoLineNumStyle,
                 maxLines = 1,
                 softWrap = false,
-                modifier = Modifier.width(styles.prefixWidth)
+                modifier = Modifier
+                    .padding(start = 4.dp, end = 4.dp)
+                    .width(styles.totalLineNumGutterWidth)
             )
         }
 
-        // Line text content (fully selectable for copying)
+        // Prefix indicator (+, -, or space)
         Text(
-            text = line.annotatedText,
+            text = prefix,
+            color = prefixColor,
+            style = styles.prefixBoldStyle,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.width(styles.prefixWidth)
+        )
+
+        // Line text content
+        Text(
+            text = annotatedText,
             style = textStyle,
             softWrap = styles.lineWrap,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 2.dp, end = 8.dp)
         )
+    }
+}
+
+private fun copyToClipboard(context: Context, text: String) {
+    try {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = ClipData.newPlainText("diff line", text)
+        clipboard?.setPrimaryClip(clip)
+        Toast.makeText(context, "Line copied to clipboard", Toast.LENGTH_SHORT).show()
+    } catch (_: Exception) {}
+}
+
+private fun highlightSearchInString(text: String, query: String): AnnotatedString {
+    return buildAnnotatedString {
+        append(text)
+        var startIndex = text.indexOf(query, ignoreCase = true)
+        while (startIndex >= 0 && startIndex < text.length) {
+            val endIndex = (startIndex + query.length).coerceAtMost(text.length)
+            addStyle(
+                style = SpanStyle(
+                    background = Color(0xFFFFEB3B),
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold
+                ),
+                start = startIndex,
+                end = endIndex
+            )
+            startIndex = text.indexOf(query, startIndex + 1, ignoreCase = true)
+        }
+    }
+}
+
+private fun highlightSearchInAnnotated(base: AnnotatedString, text: String, query: String): AnnotatedString {
+    return buildAnnotatedString {
+        append(base)
+        var startIndex = text.indexOf(query, ignoreCase = true)
+        while (startIndex >= 0 && startIndex < text.length) {
+            val endIndex = (startIndex + query.length).coerceAtMost(text.length)
+            addStyle(
+                style = SpanStyle(
+                    background = Color(0xFFFFEB3B),
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold
+                ),
+                start = startIndex,
+                end = endIndex
+            )
+            startIndex = text.indexOf(query, startIndex + 1, ignoreCase = true)
+        }
     }
 }
 
